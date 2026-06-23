@@ -384,10 +384,15 @@ function parseCurrency(value) {
 function normalizeDate(value) {
   const text = normalizeText(value);
   const brDate = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const isoDate = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
   if (brDate) {
     const [, day, month, year] = brDate;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+
+  if (isoDate) {
+    return isoDate[0];
   }
 
   return text;
@@ -541,7 +546,8 @@ function currency(value) {
 
 function formatDate(value) {
   if (!value) return '';
-  const date = new Date(`${value}T12:00:00`);
+  const normalized = normalizeDate(value);
+  const date = new Date(`${normalized}T12:00:00`);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString('pt-BR');
 }
 

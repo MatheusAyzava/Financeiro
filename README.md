@@ -73,7 +73,15 @@ function doGet(e) {
   const callback = e.parameter.callback;
 
   if (action === 'listTransactions') {
-    const values = sheet.getDataRange().getValues();
+    const values = sheet.getDataRange().getValues().map((row, rowIndex) =>
+      row.map((cell, columnIndex) => {
+        if (rowIndex > 0 && columnIndex === 0 && cell instanceof Date) {
+          return Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        }
+
+        return cell;
+      })
+    );
     const output = JSON.stringify({ values });
 
     if (callback) {
