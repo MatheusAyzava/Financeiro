@@ -435,27 +435,29 @@ async function appendTransactionsToSheet(config, transactionsToAppend) {
   const scriptUrl = normalizeText(config.scriptUrl);
   if (!scriptUrl) return;
 
+  const payload = JSON.stringify({
+    action: 'appendTransactions',
+    transactions: transactionsToAppend.map((item) => [
+      item.date,
+      item.description,
+      item.category,
+      item.account,
+      item.amount,
+      item.person,
+      item.card,
+      item.status,
+      item.installments,
+      item.notes,
+    ]),
+  });
+
   await fetch(scriptUrl, {
     method: 'POST',
     mode: 'no-cors',
     headers: {
-      'Content-Type': 'text/plain;charset=utf-8',
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
     },
-    body: JSON.stringify({
-      action: 'appendTransactions',
-      transactions: transactionsToAppend.map((item) => [
-        item.date,
-        item.description,
-        item.category,
-        item.account,
-        item.amount,
-        item.person,
-        item.card,
-        item.status,
-        item.installments,
-        item.notes,
-      ]),
-    }),
+    body: new URLSearchParams({ payload }),
   });
 }
 
@@ -479,7 +481,7 @@ function monthKey(value) {
 function App() {
   const [activePage, setActivePage] = useState('overview');
   const [transactions, setTransactions] = useState(() =>
-    getSavedItems('fincontrol:transactions', sampleTransactions).map(normalizeTransaction),
+    getSavedItems('fincontrol:transactions', []).map(normalizeTransaction),
   );
   const [search, setSearch] = useState('');
   const [personFilter, setPersonFilter] = useState('Todos');
@@ -495,6 +497,11 @@ function App() {
   const [debts, setDebts] = useState(() => getSavedItems('fincontrol:debts', defaultDebts));
 
   function loadSheetData(config = sheetsConfig) {
+    if (!config.apiKey || !config.sheetId) {
+      setSyncStatus('Configure Google Sheets para sincronizar.');
+      return;
+    }
+
     setSyncStatus('Buscando dados no Google Sheets...');
 
     fetchSheetTransactions(config)
@@ -506,7 +513,9 @@ function App() {
           return;
         }
 
-        setSyncStatus('Informe a chave e a planilha para sincronizar.');
+        setTransactions([]);
+        saveItems('fincontrol:transactions', []);
+        setSyncStatus('Planilha conectada, mas ainda sem lancamentos.');
       })
       .catch((error) => setSyncStatus(error.message));
   }

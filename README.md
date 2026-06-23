@@ -69,7 +69,8 @@ const SHEET_NAME = 'Lancamentos';
 
 function doPost(e) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const payload = JSON.parse(e.postData.contents || '{}');
+  const payloadText = e.parameter.payload || e.postData.contents || '{}';
+  const payload = JSON.parse(payloadText);
 
   if (payload.action !== 'appendTransactions') {
     return ContentService.createTextOutput('ignored');

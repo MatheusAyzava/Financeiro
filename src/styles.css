@@ -1140,7 +1140,20 @@ td {
   }
 
   .nav {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .brand div:last-child,
+  .nav-item {
+    font-size: 13px;
+  }
+
+  .nav-item {
+    justify-content: flex-start;
+  }
+
+  .nav-item span {
+    font-size: 11px;
   }
 
   .content {
