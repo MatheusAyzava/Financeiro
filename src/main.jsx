@@ -415,6 +415,43 @@ function parseSheetRows(rows) {
     );
 }
 
+function fetchScriptJsonp(scriptUrl, params = {}) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `fincontrolCallback${Date.now()}${Math.random().toString(36).slice(2)}`;
+    const url = new URL(scriptUrl);
+
+    Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+    url.searchParams.set('callback', callbackName);
+
+    const script = document.createElement('script');
+    const cleanup = () => {
+      delete window[callbackName];
+      script.remove();
+    };
+
+    window[callbackName] = (data) => {
+      cleanup();
+      resolve(data);
+    };
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error('Nao foi possivel ler via Google Apps Script.'));
+    };
+
+    script.src = url.toString();
+    document.body.appendChild(script);
+  });
+}
+
+async function fetchScriptTransactions(config) {
+  const scriptUrl = normalizeText(config.scriptUrl);
+  if (!scriptUrl) return null;
+
+  const data = await fetchScriptJsonp(scriptUrl, { action: 'listTransactions' });
+  return parseSheetRows(data.values || []);
+}
+
 async function fetchSheetTransactions(config) {
   const apiKey = normalizeText(config.apiKey);
   const sheetId = extractSheetId(config.sheetId);
@@ -531,14 +568,16 @@ function App() {
   const [debts, setDebts] = useState(() => getSavedItems('fincontrol:debts', defaultDebts));
 
   function loadSheetData(config = sheetsConfig) {
-    if (!config.apiKey || !config.sheetId) {
+    if (!config.scriptUrl && (!config.apiKey || !config.sheetId)) {
       setSyncStatus('Configure Google Sheets para sincronizar.');
       return;
     }
 
     setSyncStatus('Buscando dados no Google Sheets...');
 
-    fetchSheetTransactions(config)
+    const source = config.scriptUrl ? fetchScriptTransactions(config) : fetchSheetTransactions(config);
+
+    source
       .then((sheetTransactions) => {
         if (sheetTransactions?.length) {
           setTransactions(sheetTransactions);
@@ -551,7 +590,21 @@ function App() {
         saveItems('fincontrol:transactions', []);
         setSyncStatus('Planilha conectada, mas ainda sem lancamentos.');
       })
-      .catch((error) => setSyncStatus(error.message));
+      .catch((error) => {
+        if (config.scriptUrl && config.apiKey && config.sheetId) {
+          fetchSheetTransactions(config)
+            .then((sheetTransactions) => {
+              const rows = sheetTransactions || [];
+              setTransactions(rows);
+              saveItems('fincontrol:transactions', rows);
+              setSyncStatus(rows.length ? 'Dados carregados do Google Sheets.' : 'Planilha conectada, mas ainda sem lancamentos.');
+            })
+            .catch(() => setSyncStatus(error.message));
+          return;
+        }
+
+        setSyncStatus(error.message);
+      });
   }
 
   function saveSheetsConfig(nextConfig) {
@@ -669,7 +722,7 @@ function App() {
   }, [selectedMonth, transactions]);
 
   function refreshSheetSoon(delay = 1200) {
-    if (!sheetsConfig.apiKey || !sheetsConfig.sheetId) return;
+    if (!sheetsConfig.scriptUrl && (!sheetsConfig.apiKey || !sheetsConfig.sheetId)) return;
     window.setTimeout(() => loadSheetData(sheetsConfig), delay);
   }
 

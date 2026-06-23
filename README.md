@@ -67,6 +67,29 @@ A Google Sheets API com `VITE_GOOGLE_API_KEY` serve para ler a planilha. Para gr
 ```javascript
 const SHEET_NAME = 'Lancamentos';
 
+function doGet(e) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  const action = e.parameter.action;
+  const callback = e.parameter.callback;
+
+  if (action === 'listTransactions') {
+    const values = sheet.getDataRange().getValues();
+    const output = JSON.stringify({ values });
+
+    if (callback) {
+      return ContentService
+        .createTextOutput(`${callback}(${output})`)
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+
+    return ContentService
+      .createTextOutput(output)
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  return ContentService.createTextOutput('ignored');
+}
+
 function doPost(e) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
   const payloadText = e.parameter.payload || e.postData.contents || '{}';
@@ -115,7 +138,7 @@ function doPost(e) {
 VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
 ```
 
-Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, e exclusoes feitas no app tambem removerao a linha correspondente da planilha.
+Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, exclusoes feitas no app tambem removerao a linha correspondente da planilha, e todos os dispositivos passarao a carregar os lancamentos direto do Apps Script.
 
 ## Vencimentos e lembretes
 
