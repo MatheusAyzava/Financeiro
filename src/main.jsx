@@ -196,6 +196,7 @@ function normalizeTransaction(transaction) {
     status: normalizeText(transaction.status) || 'Pago',
     installments: Number(transaction.installments) || 1,
     notes: normalizeText(transaction.notes),
+    sheetRow: transaction.sheetRow ? Number(transaction.sheetRow) : null,
   };
 }
 
@@ -394,9 +395,10 @@ function normalizeDate(value) {
 
 function parseSheetRows(rows) {
   return rows
+    .map((row, index) => ({ row, sheetRow: index + 1 }))
     .slice(1)
-    .filter((row) => row.some(Boolean))
-    .map((row) =>
+    .filter(({ row }) => row.some(Boolean))
+    .map(({ row, sheetRow }) =>
       normalizeTransaction({
         date: row[0],
         description: row[1],
@@ -408,6 +410,7 @@ function parseSheetRows(rows) {
         status: row[7],
         installments: row[8],
         notes: row[9],
+        sheetRow,
       }),
     );
 }
@@ -449,6 +452,37 @@ async function appendTransactionsToSheet(config, transactionsToAppend) {
       item.installments,
       item.notes,
     ]),
+  });
+
+  await fetch(scriptUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+    },
+    body: new URLSearchParams({ payload }),
+  });
+}
+
+async function deleteTransactionFromSheet(config, transaction) {
+  const scriptUrl = normalizeText(config.scriptUrl);
+  if (!scriptUrl) return;
+
+  const payload = JSON.stringify({
+    action: 'deleteTransaction',
+    sheetRow: transaction.sheetRow,
+    transaction: [
+      transaction.date,
+      transaction.description,
+      transaction.category,
+      transaction.account,
+      transaction.amount,
+      transaction.person,
+      transaction.card,
+      transaction.status,
+      transaction.installments,
+      transaction.notes,
+    ],
   });
 
   await fetch(scriptUrl, {
@@ -634,6 +668,11 @@ function App() {
     };
   }, [selectedMonth, transactions]);
 
+  function refreshSheetSoon(delay = 1200) {
+    if (!sheetsConfig.apiKey || !sheetsConfig.sheetId) return;
+    window.setTimeout(() => loadSheetData(sheetsConfig), delay);
+  }
+
   function addTransaction() {
     setActivePage('transactions');
     setIsTransactionModalOpen(true);
@@ -659,6 +698,7 @@ function App() {
       .then(() => {
         if (sheetsConfig.scriptUrl) {
           setSyncStatus('Lancamento enviado para o Google Sheets.');
+          refreshSheetSoon();
         }
       })
       .catch(() => setSyncStatus('Lancamento salvo no app, mas nao foi enviado para a planilha.'));
@@ -669,6 +709,15 @@ function App() {
     const nextTransactions = transactions.filter((item) => item !== itemToRemove);
     setTransactions(nextTransactions);
     saveItems('fincontrol:transactions', nextTransactions);
+
+    deleteTransactionFromSheet(sheetsConfig, itemToRemove)
+      .then(() => {
+        if (sheetsConfig.scriptUrl) {
+          setSyncStatus('Lancamento excluido do Google Sheets.');
+          refreshSheetSoon();
+        }
+      })
+      .catch(() => setSyncStatus('Lancamento excluido do app, mas nao foi excluido da planilha.'));
   }
 
   function addCardBill(cardBill) {

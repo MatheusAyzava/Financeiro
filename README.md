@@ -72,17 +72,35 @@ function doPost(e) {
   const payloadText = e.parameter.payload || e.postData.contents || '{}';
   const payload = JSON.parse(payloadText);
 
-  if (payload.action !== 'appendTransactions') {
-    return ContentService.createTextOutput('ignored');
+  if (payload.action === 'appendTransactions') {
+    const rows = payload.transactions || [];
+
+    if (rows.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
+    }
+
+    return ContentService.createTextOutput('ok');
   }
 
-  const rows = payload.transactions || [];
+  if (payload.action === 'deleteTransaction') {
+    const row = Number(payload.sheetRow);
 
-  if (rows.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
+    if (row > 1 && row <= sheet.getLastRow()) {
+      sheet.deleteRow(row);
+      return ContentService.createTextOutput('deleted');
+    }
+
+    const target = JSON.stringify(payload.transaction || []);
+    const values = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 0), 10).getValues();
+    const index = values.findIndex((current) => JSON.stringify(current) === target);
+
+    if (index >= 0) {
+      sheet.deleteRow(index + 2);
+      return ContentService.createTextOutput('deleted');
+    }
   }
 
-  return ContentService.createTextOutput('ok');
+  return ContentService.createTextOutput('ignored');
 }
 ```
 
@@ -97,7 +115,7 @@ function doPost(e) {
 VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
 ```
 
-Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`.
+Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, e exclusoes feitas no app tambem removerao a linha correspondente da planilha.
 
 ## Vencimentos e lembretes
 
