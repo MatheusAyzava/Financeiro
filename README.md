@@ -30,6 +30,7 @@ A configuracao fica salva no navegador.
 VITE_GOOGLE_API_KEY=sua_chave_da_api
 VITE_GOOGLE_SHEET_ID=id_da_sua_planilha
 VITE_GOOGLE_SHEET_RANGE=Lancamentos!A:J
+VITE_GOOGLE_SCRIPT_URL=url_do_web_app_do_google_apps_script
 ```
 
 O ID da planilha fica na URL:
@@ -55,6 +56,47 @@ Exemplo:
 ```
 
 Valores positivos entram como receita. Valores negativos entram como despesa.
+
+## Gravar novos lancamentos no Google Sheets
+
+A Google Sheets API com `VITE_GOOGLE_API_KEY` serve para ler a planilha. Para gravar novos lancamentos, crie um Web App no Google Apps Script:
+
+1. Na planilha, clique em `Extensoes > Apps Script`.
+2. Apague o conteudo inicial e cole:
+
+```javascript
+const SHEET_NAME = 'Lancamentos';
+
+function doPost(e) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  const payload = JSON.parse(e.postData.contents || '{}');
+
+  if (payload.action !== 'appendTransactions') {
+    return ContentService.createTextOutput('ignored');
+  }
+
+  const rows = payload.transactions || [];
+
+  if (rows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
+  }
+
+  return ContentService.createTextOutput('ok');
+}
+```
+
+3. Clique em `Implantar > Nova implantacao`.
+4. Tipo: `App da Web`.
+5. Executar como: `Eu`.
+6. Quem tem acesso: `Qualquer pessoa`.
+7. Clique em `Implantar` e copie a URL que termina em `/exec`.
+8. No Netlify, crie a variavel:
+
+```text
+VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
+```
+
+Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`.
 
 ## Vencimentos e lembretes
 

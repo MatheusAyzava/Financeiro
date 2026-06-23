@@ -16,6 +16,7 @@ import './styles.css';
 const GOOGLE_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 const GOOGLE_SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID;
 const GOOGLE_SHEET_RANGE = import.meta.env.VITE_GOOGLE_SHEET_RANGE || 'Lancamentos!A:J';
+const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 
 const accounts = ['Banco do Brasil', 'Nubank', 'Carteira'];
 const defaultCategories = [
@@ -355,6 +356,7 @@ function getInitialSheetsConfig() {
     apiKey: localConfig.apiKey || GOOGLE_API_KEY || '',
     sheetId: localConfig.sheetId || GOOGLE_SHEET_ID || '',
     range: localConfig.range || GOOGLE_SHEET_RANGE,
+    scriptUrl: localConfig.scriptUrl || GOOGLE_SCRIPT_URL || '',
   };
 }
 
@@ -427,6 +429,34 @@ async function fetchSheetTransactions(config) {
 
   const data = await response.json();
   return parseSheetRows(data.values || []);
+}
+
+async function appendTransactionsToSheet(config, transactionsToAppend) {
+  const scriptUrl = normalizeText(config.scriptUrl);
+  if (!scriptUrl) return;
+
+  await fetch(scriptUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8',
+    },
+    body: JSON.stringify({
+      action: 'appendTransactions',
+      transactions: transactionsToAppend.map((item) => [
+        item.date,
+        item.description,
+        item.category,
+        item.account,
+        item.amount,
+        item.person,
+        item.card,
+        item.status,
+        item.installments,
+        item.notes,
+      ]),
+    }),
+  });
 }
 
 function currency(value) {
@@ -615,6 +645,14 @@ function App() {
     localStorage.setItem('fincontrol:cards', JSON.stringify(nextCards));
     setIsTransactionModalOpen(false);
     setSelectedMonth(monthKey(installments[0].date) || selectedMonth);
+
+    appendTransactionsToSheet(sheetsConfig, installments)
+      .then(() => {
+        if (sheetsConfig.scriptUrl) {
+          setSyncStatus('Lancamento enviado para o Google Sheets.');
+        }
+      })
+      .catch(() => setSyncStatus('Lancamento salvo no app, mas nao foi enviado para a planilha.'));
   }
 
   function removeTransaction(indexToRemove) {
@@ -2081,9 +2119,18 @@ function Settings({ config, exportBackup, exportTransactionsCsv, importBackup, o
         <label>
           Intervalo da aba
           <input
-            placeholder="Lancamentos!A:E"
+            placeholder="Lancamentos!A:J"
             value={draft.range}
             onChange={(event) => updateDraft('range', event.target.value)}
+          />
+        </label>
+
+        <label>
+          URL do Google Apps Script para gravar na planilha
+          <input
+            placeholder="https://script.google.com/macros/s/..."
+            value={draft.scriptUrl}
+            onChange={(event) => updateDraft('scriptUrl', event.target.value)}
           />
         </label>
 
@@ -2094,8 +2141,8 @@ function Settings({ config, exportBackup, exportTransactionsCsv, importBackup, o
         <div className="info-box">
           <strong>Como ativar a sincronizacao?</strong>
           <p>
-            Informe a chave da API, cole a URL da planilha e deixe a planilha publica para leitura ou restrinja a
-            chave ao dominio do seu app no Google Cloud.
+            A chave da API le a planilha. Para gravar novos lancamentos nela, cole tambem a URL do Web App criado no
+            Google Apps Script.
           </p>
           <small>Status atual: {syncStatus}</small>
         </div>
@@ -2126,8 +2173,8 @@ function Settings({ config, exportBackup, exportTransactionsCsv, importBackup, o
         <div className="info-box">
           <strong>Sincronizacao completa com Google Sheets</strong>
           <p>
-            A leitura por chave API ja esta pronta. Para gravar direto na planilha com seguranca, o ideal e criar um
-            backend com OAuth ou conta de servico; por enquanto voce pode exportar CSV e importar na planilha.
+            A leitura usa a Google Sheets API. A gravacao usa um Web App do Google Apps Script para adicionar linhas na
+            aba `Lancamentos`.
           </p>
         </div>
       </section>
