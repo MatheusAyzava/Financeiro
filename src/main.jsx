@@ -276,12 +276,17 @@ function expandSheetInstallments(transaction) {
   const installmentAmount = transaction.amount / installments;
 
   return Array.from({ length: installments }, (_, index) =>
-    normalizeTransaction({
-      ...transaction,
-      date: addMonths(transaction.date, transaction.amount < 0 ? index + 1 : index),
-      amount: installmentAmount,
-      description: `${transaction.description} (${index + 1}/${installments})`,
-      sheetRow: transaction.sheetRow,
+    ({
+      ...normalizeTransaction({
+        ...transaction,
+        date: addMonths(transaction.date, transaction.amount < 0 ? index + 1 : index),
+        amount: installmentAmount,
+        description: `${transaction.description} (${index + 1}/${installments})`,
+        sheetRow: transaction.sheetRow,
+      }),
+      isProjectedInstallment: true,
+      installmentNumber: index + 1,
+      originalTransaction: transaction,
     }),
   );
 }
@@ -812,7 +817,8 @@ function App() {
   }
 
   function editTransaction(indexToEdit) {
-    setEditingTransaction(filteredTransactions[indexToEdit]);
+    const transaction = filteredTransactions[indexToEdit];
+    setEditingTransaction(transaction.isProjectedInstallment ? transaction.originalTransaction : transaction);
     setActivePage('transactions');
     setIsTransactionModalOpen(true);
   }
@@ -825,7 +831,13 @@ function App() {
         amount,
         sheetRow: editingTransaction.sheetRow,
       });
-      const nextTransactions = transactions.map((item) => (item === editingTransaction ? normalized : item));
+      const nextTransactions =
+        normalized.sheetRow
+          ? [
+              ...transactions.filter((item) => item.sheetRow !== normalized.sheetRow),
+              ...expandSheetInstallments(normalized),
+            ]
+          : transactions.map((item) => (item === editingTransaction ? normalized : item));
 
       setTransactions(nextTransactions);
       saveItems('fincontrol:transactions', nextTransactions);
