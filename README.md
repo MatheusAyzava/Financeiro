@@ -178,7 +178,8 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 - Ao editar uma parcela projetada, o app edita a compra original da planilha e recalcula as parcelas.
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra uso estimado por cartao e contas a receber de pessoas que usaram seu cartao.
-- Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Alessandra ou outra pessoa usou.
+- Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Gabi, Alessandra ou outra pessoa usou.
+- `Matheus` e `Gabi` sao tratados como donos, entao nao entram no resumo de cartao emprestado. Valores de outras pessoas continuam aparecendo como emprestado.
 
 ## Relatorios e backup
 

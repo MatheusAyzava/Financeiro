@@ -30,7 +30,8 @@ const defaultCategories = [
   'Dividas e Obrigacoes',
   'Emprestimos',
 ];
-const defaultPeople = ['Eu', 'Matheus', 'Alessandra'];
+const ownerPeople = ['Matheus', 'Gabi', 'Eu'];
+const defaultPeople = ['Matheus', 'Gabi', 'Alessandra'];
 const defaultCards = ['Banco do Brasil', 'Nubank', 'Cartao emprestado'];
 
 const sampleTransactions = [
@@ -178,7 +179,7 @@ function getDefaultTransaction() {
     category: 'Alimentacao',
     account: 'Carteira',
     amount: '',
-    person: 'Eu',
+    person: 'Matheus',
     card: '',
     status: 'Debito',
     installments: 1,
@@ -223,7 +224,7 @@ function normalizeTransaction(transaction) {
     category: normalizeText(transaction.category) || 'Sem categoria',
     account: normalizeText(transaction.account) || 'Sem conta',
     amount,
-    person: normalizeText(transaction.person) || 'Eu',
+    person: normalizeText(transaction.person) || 'Matheus',
     card: normalizeText(transaction.card),
     status: normalizedStatus,
     installments: Number(transaction.installments) || 1,
@@ -242,6 +243,15 @@ function getSavedList(key, fallback) {
     localStorage.removeItem(key);
     return fallback;
   }
+}
+
+function getSavedPeople() {
+  return getSavedList('fincontrol:people', defaultPeople).filter((person) => person.toLowerCase() !== 'eu');
+}
+
+function isOwnerPerson(person) {
+  const normalized = normalizeText(person).toLowerCase();
+  return ownerPeople.some((owner) => owner.toLowerCase() === normalized);
 }
 
 function getSavedItems(key, fallback) {
@@ -314,6 +324,29 @@ function expandSheetInstallments(transaction) {
       originalTransaction: transaction,
     }),
   );
+}
+
+function dedupeTransactions(transactionsToDedupe) {
+  const seen = new Set();
+
+  return transactionsToDedupe.filter((transaction) => {
+    const key = [
+      transaction.date,
+      transaction.description,
+      transaction.category,
+      transaction.account,
+      transaction.amount,
+      transaction.person,
+      transaction.card,
+      transaction.status,
+      transaction.installments,
+      transaction.notes,
+    ].join('|');
+
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function getMonthlyMetrics(transactions, month) {
@@ -463,7 +496,7 @@ function normalizeDate(value) {
 }
 
 function parseSheetRows(rows) {
-  return rows
+  const parsedRows = rows
     .map((row, index) => ({ row, sheetRow: index + 1 }))
     .slice(1)
     .filter(({ row }) => row.some(Boolean))
@@ -484,6 +517,8 @@ function parseSheetRows(rows) {
 
       return expandSheetInstallments(transaction);
     });
+
+  return dedupeTransactions(parsedRows);
 }
 
 function fetchScriptJsonp(scriptUrl, params = {}) {
@@ -664,7 +699,7 @@ function App() {
   const [sheetsConfig, setSheetsConfig] = useState(getInitialSheetsConfig);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState(null);
-  const [people, setPeople] = useState(() => getSavedList('fincontrol:people', defaultPeople));
+  const [people, setPeople] = useState(getSavedPeople);
   const [cards, setCards] = useState(() => getSavedList('fincontrol:cards', defaultCards));
   const [cardBills, setCardBills] = useState(() => getSavedItems('fincontrol:card-bills', defaultCardBills));
   const [reminders, setReminders] = useState(() => getSavedItems('fincontrol:reminders', defaultReminders));
@@ -804,7 +839,7 @@ function App() {
   const receivables = useMemo(
     () =>
       transactions
-        .filter((item) => item.amount < 0 && item.person && item.person.toLowerCase() !== 'eu')
+        .filter((item) => item.amount < 0 && item.person && !isOwnerPerson(item.person))
         .map((item) => ({
           ...item,
           receivableAmount: Math.abs(item.amount),
@@ -885,7 +920,9 @@ function App() {
     setTransactions(nextTransactions);
     saveItems('fincontrol:transactions', nextTransactions);
 
-    const nextPeople = [...new Set([...people, ...installments.map((item) => item.person)].filter(Boolean))];
+    const nextPeople = [
+      ...new Set([...people, ...installments.map((item) => item.person)].filter((person) => person && person.toLowerCase() !== 'eu')),
+    ];
     const nextCards = [...new Set([...cards, ...installments.map((item) => item.card)].filter(Boolean))];
 
     setPeople(nextPeople);
@@ -1612,7 +1649,7 @@ function Transactions({
 }) {
   const borrowedSummary = useMemo(() => {
     const totals = transactions
-      .filter((item) => item.amount < 0 && item.person && item.person.toLowerCase() !== 'eu')
+      .filter((item) => item.amount < 0 && item.person && !isOwnerPerson(item.person))
       .reduce((acc, item) => {
         acc[item.person] = (acc[item.person] || 0) + Math.abs(item.amount);
         return acc;
