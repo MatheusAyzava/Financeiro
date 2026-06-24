@@ -172,7 +172,8 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 ## Cartoes, pessoas e parcelas
 
 - Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
-- No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. Se voce ja esta lancando o valor da parcela, marque `Valor de cada parcela` para o app nao dividir novamente.
+- No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. O padrao e `Valor de cada parcela`, para o app nao dividir novamente valores como `29,49`.
+- Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.
 - Se uma linha ja existir na planilha com `Parcelas` maior que `1`, o app tambem projeta essas parcelas nos meses seguintes ao carregar os dados.
 - Ao editar uma parcela projetada, o app edita a compra original da planilha e recalcula as parcelas.
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.

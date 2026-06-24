@@ -172,7 +172,7 @@ function today() {
 function getDefaultTransaction() {
   return {
     type: 'expense',
-    amountMode: 'total',
+    amountMode: 'installment',
     date: today(),
     description: '',
     category: 'Alimentacao',
@@ -187,18 +187,25 @@ function getDefaultTransaction() {
 }
 
 const INSTALLMENT_VALUE_MARKER = '[valor-parcela]';
+const TOTAL_VALUE_MARKER = '[valor-total]';
 
 function isInstallmentValueMode(notes) {
-  return normalizeText(notes).includes(INSTALLMENT_VALUE_MARKER);
+  const text = normalizeText(notes);
+  return text.includes(INSTALLMENT_VALUE_MARKER) || !text.includes(TOTAL_VALUE_MARKER);
+}
+
+function isTotalValueMode(notes) {
+  return normalizeText(notes).includes(TOTAL_VALUE_MARKER);
 }
 
 function cleanInstallmentValueMarker(notes) {
-  return normalizeText(notes).replace(INSTALLMENT_VALUE_MARKER, '').trim();
+  return normalizeText(notes).replace(INSTALLMENT_VALUE_MARKER, '').replace(TOTAL_VALUE_MARKER, '').trim();
 }
 
 function withInstallmentValueMarker(notes, amountMode) {
   const cleanNotes = cleanInstallmentValueMarker(notes);
-  return amountMode === 'installment' ? `${INSTALLMENT_VALUE_MARKER} ${cleanNotes}`.trim() : cleanNotes;
+  if (amountMode === 'total') return `${TOTAL_VALUE_MARKER} ${cleanNotes}`.trim();
+  return `${INSTALLMENT_VALUE_MARKER} ${cleanNotes}`.trim();
 }
 
 function normalizeTransaction(transaction) {
@@ -263,7 +270,7 @@ function expandInstallments(transaction) {
 
   if (installments === 1) return [normalizeTransaction(transaction)];
 
-  const isInstallmentValue = transaction.amountMode === 'installment' || isInstallmentValueMode(transaction.notes);
+  const isInstallmentValue = transaction.amountMode === 'installment' || (!isTotalValueMode(transaction.notes) && isInstallmentValueMode(transaction.notes));
   const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
   const startsNextMonth = transaction.amount < 0;
 
@@ -290,7 +297,7 @@ function expandSheetInstallments(transaction) {
     return [transaction];
   }
 
-  const isInstallmentValue = isInstallmentValueMode(transaction.notes);
+  const isInstallmentValue = !isTotalValueMode(transaction.notes);
   const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
 
   return Array.from({ length: installments }, (_, index) =>
