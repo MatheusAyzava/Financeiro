@@ -791,6 +791,15 @@ function getTransactionBillingMonth(transaction, cardBills, selectedCard = '') {
   return day > closingDay ? monthKey(addMonths(normalizedDate, 1)) : monthKey(normalizedDate);
 }
 
+function getCardInvoiceTransactions(card, cardBills, transactions, selectedMonth) {
+  return transactions.filter(
+    (item) =>
+      item.amount < 0 &&
+      (sameCardName(item.card, card.name) || sameCardName(item.account, card.name)) &&
+      getTransactionBillingMonth(item, cardBills, card.name) === selectedMonth,
+  );
+}
+
 function App() {
   const [activePage, setActivePage] = useState('overview');
   const [transactions, setTransactions] = useState(() =>
@@ -1289,6 +1298,7 @@ function App() {
               removeCardBill={removeCardBill}
               receivables={receivables}
               selectedMonth={selectedMonth}
+              setSelectedMonth={setSelectedMonth}
               transactions={transactions}
               updateCardBill={updateCardBill}
             />
@@ -2049,22 +2059,23 @@ function Transactions({
   );
 }
 
-function CardsPage({ cardBills, removeCardBill, receivables, selectedMonth, transactions, updateCardBill }) {
+function CardsPage({ cardBills, removeCardBill, receivables, selectedMonth, setSelectedMonth, transactions, updateCardBill }) {
   const cardUsage = cardBills.map((card) => {
-    const total = transactions
-      .filter(
-        (item) =>
-          item.amount < 0 &&
-          (sameCardName(item.card, card.name) || sameCardName(item.account, card.name)) &&
-          getTransactionBillingMonth(item, cardBills, card.name) === selectedMonth,
-      )
+    const invoiceTransactions = getCardInvoiceTransactions(card, cardBills, transactions, selectedMonth);
+    const total = invoiceTransactions.reduce((sum, item) => sum + Math.abs(item.amount), 0);
+    const borrowedTotal = invoiceTransactions
+      .filter((item) => item.person && !isOwnerPerson(item.person))
       .reduce((sum, item) => sum + Math.abs(item.amount), 0);
 
-    return { ...card, total };
+    return { ...card, total, borrowedTotal };
   });
 
   const receivablesTotal = receivables
-    .filter((item) => monthKey(item.date) === selectedMonth && item.receivableStatus !== 'Quitado')
+    .filter(
+      (item) =>
+        getTransactionBillingMonth(item, cardBills, item.card || item.account) === selectedMonth &&
+        item.receivableStatus !== 'Quitado',
+    )
     .reduce((sum, item) => sum + item.receivableAmount, 0);
 
   return (
@@ -2074,6 +2085,10 @@ function CardsPage({ cardBills, removeCardBill, receivables, selectedMonth, tran
           <h1>Cartoes</h1>
           <p>Faturas, vencimentos e valores a receber de quem usou seu cartao.</p>
         </div>
+        <label className="month-label">
+          Periodo:
+          <input type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
+        </label>
       </div>
 
       <div className="card-dashboard">
@@ -2085,12 +2100,12 @@ function CardsPage({ cardBills, removeCardBill, receivables, selectedMonth, tran
       <section className="panel large-panel">
         <h2>Contas a receber por pessoa</h2>
         <div className="receivable-total">
-          <span>Total em aberto no mes</span>
+          <span>Total em aberto na fatura selecionada</span>
           <strong>{currency(receivablesTotal)}</strong>
         </div>
         <div className="receivable-list">
           {receivables
-            .filter((item) => monthKey(item.date) === selectedMonth)
+            .filter((item) => getTransactionBillingMonth(item, cardBills, item.card || item.account) === selectedMonth)
             .map((item, index) => (
               <article key={`${item.person}-${item.description}-${index}`}>
                 <div>
@@ -2183,7 +2198,8 @@ function EditableCardPanel({ card, onRemove, onUpdate }) {
       </div>
       <p>Fecha dia {card.closingDay} - vence dia {card.dueDay}</p>
       <strong>{currency(card.total)}</strong>
-      <small>Uso estimado no mes selecionado</small>
+      <small>Total da fatura, incluindo todas as pessoas</small>
+      {card.borrowedTotal > 0 && <small>A receber de terceiros: {currency(card.borrowedTotal)}</small>}
       <div className="card-actions">
         <button type="button" onClick={() => setIsEditing(true)}>
           Editar vencimento
