@@ -176,6 +176,7 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 - Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.
 - Se uma linha ja existir na planilha com `Parcelas` maior que `1`, o app tambem projeta essas parcelas nos meses seguintes ao carregar os dados.
 - Ao editar uma parcela projetada, o app edita a compra original da planilha e recalcula as parcelas.
+- A planilha deve guardar apenas a compra original. O app mostra as parcelas futuras automaticamente, no estilo `Parcela 1 de 3`, `Parcela 2 de 3`.
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra uso estimado por cartao e contas a receber de pessoas que usaram seu cartao.
 - Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Gabi, Alessandra ou outra pessoa usou.

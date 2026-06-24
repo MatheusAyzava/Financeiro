@@ -300,6 +300,15 @@ function isExpandedInstallment(description, installments) {
   return new RegExp(`\\(\\d+/${installments}\\)$`).test(normalizeText(description));
 }
 
+function getInstallmentNumber(description) {
+  const match = normalizeText(description).match(/\((\d+)\/\d+\)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function stripInstallmentSuffix(description) {
+  return normalizeText(description).replace(/\s*\(\d+\/\d+\)$/, '').trim();
+}
+
 function expandSheetInstallments(transaction) {
   const installments = Math.max(Number(transaction.installments) || 1, 1);
 
@@ -330,18 +339,30 @@ function dedupeTransactions(transactionsToDedupe) {
   const seen = new Set();
 
   return transactionsToDedupe.filter((transaction) => {
-    const key = [
-      transaction.date,
-      transaction.description,
-      transaction.category,
-      transaction.account,
-      transaction.amount,
-      transaction.person,
-      transaction.card,
-      transaction.status,
-      transaction.installments,
-      transaction.notes,
-    ].join('|');
+    const installmentNumber = transaction.installmentNumber || getInstallmentNumber(transaction.description);
+    const key =
+      transaction.installments > 1
+        ? [
+            transaction.date,
+            stripInstallmentSuffix(transaction.description).toLowerCase(),
+            installmentNumber || '',
+            transaction.installments,
+            Math.abs(transaction.amount).toFixed(2),
+            normalizeText(transaction.person).toLowerCase(),
+            normalizeText(transaction.card).toLowerCase(),
+          ].join('|')
+        : [
+            transaction.date,
+            transaction.description,
+            transaction.category,
+            transaction.account,
+            transaction.amount,
+            transaction.person,
+            transaction.card,
+            transaction.status,
+            transaction.installments,
+            transaction.notes,
+          ].join('|');
 
     if (seen.has(key)) return false;
     seen.add(key);
@@ -915,24 +936,25 @@ function App() {
       return;
     }
 
-    const installments = expandInstallments(transaction);
-    const nextTransactions = [...installments, ...transactions];
+    const baseTransaction = normalizeTransaction(transaction);
+    const projectedInstallments = expandSheetInstallments(baseTransaction);
+    const nextTransactions = [...projectedInstallments, ...transactions];
     setTransactions(nextTransactions);
     saveItems('fincontrol:transactions', nextTransactions);
 
     const nextPeople = [
-      ...new Set([...people, ...installments.map((item) => item.person)].filter((person) => person && person.toLowerCase() !== 'eu')),
+      ...new Set([...people, baseTransaction.person].filter((person) => person && person.toLowerCase() !== 'eu')),
     ];
-    const nextCards = [...new Set([...cards, ...installments.map((item) => item.card)].filter(Boolean))];
+    const nextCards = [...new Set([...cards, baseTransaction.card].filter(Boolean))];
 
     setPeople(nextPeople);
     setCards(nextCards);
     localStorage.setItem('fincontrol:people', JSON.stringify(nextPeople));
     localStorage.setItem('fincontrol:cards', JSON.stringify(nextCards));
     setIsTransactionModalOpen(false);
-    setSelectedMonth(monthKey(installments[0].date) || selectedMonth);
+    setSelectedMonth(monthKey(projectedInstallments[0]?.date || baseTransaction.date) || selectedMonth);
 
-    appendTransactionsToSheet(sheetsConfig, installments)
+    appendTransactionsToSheet(sheetsConfig, [baseTransaction])
       .then(() => {
         if (sheetsConfig.scriptUrl) {
           setSyncStatus('Lancamento enviado para o Google Sheets.');
@@ -1723,7 +1745,14 @@ function Transactions({
             {transactions.map((item, index) => (
               <tr key={`${item.date}-${item.description}-${index}`}>
                 <td>{formatDate(item.date)}</td>
-                <td className={item.description === 'Nao informado' ? 'empty-value' : ''}>{item.description}</td>
+                <td className={item.description === 'Nao informado' ? 'empty-value' : ''}>
+                  <span className="transaction-title">{stripInstallmentSuffix(item.description)}</span>
+                  {item.installments > 1 && (
+                    <small className="transaction-subtitle">
+                      Parcela {item.installmentNumber || getInstallmentNumber(item.description) || 1} de {item.installments}
+                    </small>
+                  )}
+                </td>
                 <td>{item.category}</td>
                 <td>{item.account}</td>
                 <td>{item.person}</td>

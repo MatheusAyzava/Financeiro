@@ -538,6 +538,17 @@ td {
   font-style: italic;
 }
 
+.transaction-title,
+.transaction-subtitle {
+  display: block;
+}
+
+.transaction-subtitle {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 .value {
   font-weight: 800;
   text-align: right;
