@@ -175,6 +175,7 @@ function getDefaultTransaction() {
     type: 'expense',
     amountMode: 'installment',
     date: today(),
+    firstInstallmentMonth: getDefaultFirstInstallmentMonth(today(), 'expense'),
     description: '',
     category: 'Alimentacao',
     account: 'Carteira',
@@ -189,6 +190,7 @@ function getDefaultTransaction() {
 
 const INSTALLMENT_VALUE_MARKER = '[valor-parcela]';
 const TOTAL_VALUE_MARKER = '[valor-total]';
+const FIRST_INSTALLMENT_MARKER = 'primeira-parcela=';
 
 function isInstallmentValueMode(notes) {
   const text = normalizeText(notes);
@@ -200,13 +202,27 @@ function isTotalValueMode(notes) {
 }
 
 function cleanInstallmentValueMarker(notes) {
-  return normalizeText(notes).replace(INSTALLMENT_VALUE_MARKER, '').replace(TOTAL_VALUE_MARKER, '').trim();
+  return normalizeText(notes)
+    .replace(INSTALLMENT_VALUE_MARKER, '')
+    .replace(TOTAL_VALUE_MARKER, '')
+    .replace(/\[primeira-parcela=\d{4}-\d{2}\]/g, '')
+    .trim();
 }
 
-function withInstallmentValueMarker(notes, amountMode) {
+function getFirstInstallmentMonth(notes) {
+  const match = normalizeText(notes).match(/\[primeira-parcela=(\d{4}-\d{2})\]/);
+  return match?.[1] || '';
+}
+
+function withInstallmentMetadata(notes, amountMode, firstInstallmentMonth, installments) {
   const cleanNotes = cleanInstallmentValueMarker(notes);
-  if (amountMode === 'total') return `${TOTAL_VALUE_MARKER} ${cleanNotes}`.trim();
-  return `${INSTALLMENT_VALUE_MARKER} ${cleanNotes}`.trim();
+  const markers = [amountMode === 'total' ? TOTAL_VALUE_MARKER : INSTALLMENT_VALUE_MARKER];
+
+  if (Number(installments) > 1 && firstInstallmentMonth) {
+    markers.push(`[${FIRST_INSTALLMENT_MARKER}${firstInstallmentMonth}]`);
+  }
+
+  return [...markers, cleanNotes].filter(Boolean).join(' ').trim();
 }
 
 function normalizeTransaction(transaction) {
@@ -275,6 +291,29 @@ function addMonths(dateValue, monthsToAdd) {
   return date.toISOString().slice(0, 10);
 }
 
+function getDefaultFirstInstallmentMonth(dateValue, type = 'expense') {
+  return addMonths(dateValue, type === 'expense' ? 1 : 0).slice(0, 7);
+}
+
+function getDateInMonth(dateValue, monthValue) {
+  if (!monthValue) return dateValue;
+
+  const day = Number(normalizeDate(dateValue).slice(8, 10)) || 1;
+  const [year, month] = monthValue.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${monthValue}-${String(Math.min(day, lastDay)).padStart(2, '0')}`;
+}
+
+function getFirstInstallmentDate(transaction) {
+  const explicitMonth = transaction.firstInstallmentMonth || getFirstInstallmentMonth(transaction.notes);
+
+  if (explicitMonth) {
+    return getDateInMonth(transaction.date, explicitMonth);
+  }
+
+  return transaction.amount < 0 ? addMonths(transaction.date, 1) : transaction.date;
+}
+
 function expandInstallments(transaction) {
   const installments = Math.max(Number(transaction.installments) || 1, 1);
 
@@ -282,12 +321,12 @@ function expandInstallments(transaction) {
 
   const isInstallmentValue = transaction.amountMode === 'installment' || (!isTotalValueMode(transaction.notes) && isInstallmentValueMode(transaction.notes));
   const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
-  const startsNextMonth = transaction.amount < 0;
+  const firstInstallmentDate = getFirstInstallmentDate(transaction);
 
   return Array.from({ length: installments }, (_, index) =>
     normalizeTransaction({
       ...transaction,
-      date: addMonths(transaction.date, startsNextMonth ? index + 1 : index),
+      date: addMonths(firstInstallmentDate, index),
       amount: installmentAmount,
       description: `${transaction.description || 'Lancamento'} (${index + 1}/${installments})`,
       installments,
@@ -318,12 +357,13 @@ function expandSheetInstallments(transaction) {
 
   const isInstallmentValue = !isTotalValueMode(transaction.notes);
   const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
+  const firstInstallmentDate = getFirstInstallmentDate(transaction);
 
   return Array.from({ length: installments }, (_, index) =>
     ({
       ...normalizeTransaction({
         ...transaction,
-        date: addMonths(transaction.date, transaction.amount < 0 ? index + 1 : index),
+        date: addMonths(firstInstallmentDate, index),
         amount: installmentAmount,
         description: `${transaction.description} (${index + 1}/${installments})`,
         sheetRow: transaction.sheetRow,
@@ -368,6 +408,23 @@ function dedupeTransactions(transactionsToDedupe) {
     seen.add(key);
     return true;
   });
+}
+
+function getTransactionGroupTarget(transaction) {
+  return transaction.isProjectedInstallment && transaction.originalTransaction
+    ? transaction.originalTransaction
+    : transaction;
+}
+
+function isSameTransactionGroup(transaction, targetTransaction) {
+  const target = getTransactionGroupTarget(targetTransaction);
+  const current = getTransactionGroupTarget(transaction);
+
+  if (target.sheetRow && (transaction.sheetRow === target.sheetRow || current.sheetRow === target.sheetRow)) {
+    return true;
+  }
+
+  return transaction === target || current === target;
 }
 
 function getMonthlyMetrics(transactions, month) {
@@ -715,6 +772,7 @@ function App() {
   );
   const [search, setSearch] = useState('');
   const [personFilter, setPersonFilter] = useState('Todos');
+  const [cardFilter, setCardFilter] = useState('Todos');
   const [selectedMonth, setSelectedMonth] = useState('2026-06');
   const [syncStatus, setSyncStatus] = useState('Usando dados de exemplo.');
   const [sheetsConfig, setSheetsConfig] = useState(getInitialSheetsConfig);
@@ -850,10 +908,12 @@ function App() {
             .includes(query),
       );
       const matchesPerson = personFilter === 'Todos' || item.person === personFilter;
+      const matchesCard =
+        cardFilter === 'Todos' || (cardFilter === 'Sem cartao' ? !item.card : item.card === cardFilter);
 
-      return matchesSearch && matchesPerson;
+      return matchesSearch && matchesPerson && matchesCard;
     });
-  }, [monthlyTransactions, personFilter, search]);
+  }, [cardFilter, monthlyTransactions, personFilter, search]);
 
   const dueItems = useMemo(() => getDueItems(cardBills, reminders, selectedMonth), [cardBills, reminders, selectedMonth]);
   const nextDueItems = useMemo(() => dueItems.filter((item) => !item.paid).slice(0, 4), [dueItems]);
@@ -966,14 +1026,19 @@ function App() {
 
   function removeTransaction(indexToRemove) {
     const itemToRemove = filteredTransactions[indexToRemove];
-    const nextTransactions = transactions.filter((item) => item !== itemToRemove);
+    const deleteTarget = getTransactionGroupTarget(itemToRemove);
+    const nextTransactions = transactions.filter((item) => !isSameTransactionGroup(item, deleteTarget));
     setTransactions(nextTransactions);
     saveItems('fincontrol:transactions', nextTransactions);
 
-    deleteTransactionFromSheet(sheetsConfig, itemToRemove)
+    deleteTransactionFromSheet(sheetsConfig, deleteTarget)
       .then(() => {
         if (sheetsConfig.scriptUrl) {
-          setSyncStatus('Lancamento excluido do Google Sheets.');
+          setSyncStatus(
+            deleteTarget.installments > 1
+              ? 'Parcelamento excluido do Google Sheets.'
+              : 'Lancamento excluido do Google Sheets.',
+          );
           refreshSheetSoon();
         }
       })
@@ -1169,10 +1234,15 @@ function App() {
           {activePage === 'transactions' && (
             <Transactions
               transactions={filteredTransactions}
+              allTransactions={monthlyTransactions}
+              cards={cards}
+              cardBills={cardBills}
+              cardFilter={cardFilter}
               people={people}
               personFilter={personFilter}
               search={search}
               editTransaction={editTransaction}
+              setCardFilter={setCardFilter}
               selectedMonth={selectedMonth}
               setPersonFilter={setPersonFilter}
               setSearch={setSearch}
@@ -1451,21 +1521,43 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
       amount: Math.abs(initialTransaction.amount),
       amountMode: isInstallmentValueMode(initialTransaction.notes) ? 'installment' : 'total',
       type: initialTransaction.amount >= 0 ? 'income' : 'expense',
+      firstInstallmentMonth:
+        getFirstInstallmentMonth(initialTransaction.notes) ||
+        getDefaultFirstInstallmentMonth(initialTransaction.date, initialTransaction.amount >= 0 ? 'income' : 'expense'),
       notes: cleanInstallmentValueMarker(initialTransaction.notes),
       status: initialTransaction.status || (initialTransaction.amount >= 0 ? 'Credito' : 'Debito'),
     };
   });
 
   function updateDraft(field, value) {
-    setDraft((current) => ({ ...current, [field]: value }));
+    setDraft((current) => {
+      const next = { ...current, [field]: value };
+
+      if (field === 'date') {
+        const currentDefault = getDefaultFirstInstallmentMonth(current.date, current.type);
+        if (!current.firstInstallmentMonth || current.firstInstallmentMonth === currentDefault) {
+          next.firstInstallmentMonth = getDefaultFirstInstallmentMonth(value, current.type);
+        }
+      }
+
+      return next;
+    });
   }
 
   function updateType(type) {
-    setDraft((current) => ({
-      ...current,
-      type,
-      status: type === 'income' ? 'Credito' : 'Debito',
-    }));
+    setDraft((current) => {
+      const currentDefault = getDefaultFirstInstallmentMonth(current.date, current.type);
+
+      return {
+        ...current,
+        type,
+        firstInstallmentMonth:
+          !current.firstInstallmentMonth || current.firstInstallmentMonth === currentDefault
+            ? getDefaultFirstInstallmentMonth(current.date, type)
+            : current.firstInstallmentMonth,
+        status: type === 'income' ? 'Credito' : 'Debito',
+      };
+    });
   }
 
   function handleSubmit(event) {
@@ -1477,7 +1569,7 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
     onSave({
       ...draft,
       amount: signedAmount,
-      notes: withInstallmentValueMarker(draft.notes, draft.amountMode),
+      notes: withInstallmentMetadata(draft.notes, draft.amountMode, draft.firstInstallmentMonth, draft.installments),
       status,
     });
   }
@@ -1614,6 +1706,15 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
             />
             <small>Despesas parceladas entram a partir do mes seguinte, ate 60x.</small>
           </label>
+          <label>
+            Primeira parcela
+            <input
+              type="month"
+              value={draft.firstInstallmentMonth}
+              onChange={(event) => updateDraft('firstInstallmentMonth', event.target.value)}
+            />
+            <small>Use para parcelamentos retroativos, como primeira parcela em marco.</small>
+          </label>
         </div>
 
         <label>
@@ -1659,16 +1760,67 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
 
 function Transactions({
   transactions,
+  allTransactions,
+  cards,
+  cardBills,
+  cardFilter,
   people,
   personFilter,
   search,
   editTransaction,
+  setCardFilter,
   selectedMonth,
   setPersonFilter,
   setSearch,
   setSelectedMonth,
   removeTransaction,
 }) {
+  const [copyStatus, setCopyStatus] = useState('');
+  const cardOptions = useMemo(
+    () => [
+      ...new Set([
+        ...(cards || []),
+        ...(cardBills || []).map((cardBill) => cardBill.name),
+        ...allTransactions.map((item) => item.card),
+      ].filter(Boolean)),
+    ],
+    [allTransactions, cardBills, cards],
+  );
+  const personCardReport = useMemo(() => {
+    if (personFilter === 'Todos') {
+      return { groups: [], total: 0, text: '' };
+    }
+
+    const personTransactions = allTransactions.filter((item) => {
+      const matchesPerson = item.person === personFilter;
+      const matchesCard =
+        cardFilter === 'Todos' || (cardFilter === 'Sem cartao' ? !item.card : item.card === cardFilter);
+
+      return matchesPerson && matchesCard && item.amount < 0;
+    });
+    const groupsMap = personTransactions.reduce((acc, item) => {
+      const cardName = item.card || 'Sem cartao';
+      if (!acc[cardName]) acc[cardName] = { card: cardName, items: [], total: 0 };
+      acc[cardName].items.push(item);
+      acc[cardName].total += Math.abs(item.amount);
+      return acc;
+    }, {});
+    const groups = Object.values(groupsMap);
+    const total = groups.reduce((sum, group) => sum + group.total, 0);
+    const text = groups
+      .map((group) => {
+        const rows = group.items.map((item) => {
+          const installmentNumber = item.installmentNumber || getInstallmentNumber(item.description);
+          const installmentLabel = item.installments > 1 ? ` - ${installmentNumber || 1}/${item.installments}` : '';
+          return `${stripInstallmentSuffix(item.description)} ${currency(Math.abs(item.amount))}${installmentLabel}`;
+        });
+
+        return [`${group.card}`, ...rows, `Total: ${currency(group.total)}`].join('\n');
+      })
+      .join('\n\n');
+
+    return { groups, total, text };
+  }, [allTransactions, cardFilter, personFilter]);
   const borrowedSummary = useMemo(() => {
     const totals = transactions
       .filter((item) => item.amount < 0 && item.person && !isOwnerPerson(item.person))
@@ -1705,13 +1857,87 @@ function Transactions({
         <button type="button" className="filter-button">
           Filtros
         </button>
-        <select value={personFilter} onChange={(event) => setPersonFilter(event.target.value)}>
-          <option>Todos</option>
-          {people.map((person) => (
-            <option key={person}>{person}</option>
-          ))}
-        </select>
+        <label className="toolbar-filter">
+          Pessoa
+          <select value={personFilter} onChange={(event) => setPersonFilter(event.target.value)}>
+            <option value="Todos">Todas pessoas</option>
+            {people.map((person) => (
+              <option key={person}>{person}</option>
+            ))}
+          </select>
+        </label>
+        <label className="toolbar-filter">
+          Cartao
+          <select value={cardFilter} onChange={(event) => setCardFilter(event.target.value)}>
+            <option value="Todos">Todos cartoes</option>
+            <option value="Sem cartao">Sem cartao</option>
+            {cardOptions.map((card) => (
+              <option key={card}>{card}</option>
+            ))}
+          </select>
+        </label>
       </div>
+
+      {personFilter !== 'Todos' && (
+        <section className="person-card-report">
+          <div className="report-header">
+            <div>
+              <span>Relatorio por cartao</span>
+              <h2>{personFilter}</h2>
+              <p>
+                {cardFilter === 'Todos' ? 'Todos os cartoes' : cardFilter} no periodo selecionado
+              </p>
+            </div>
+            <div className="report-total">
+              <small>Total</small>
+              <strong>{currency(personCardReport.total)}</strong>
+            </div>
+          </div>
+
+          {personCardReport.groups.length > 0 ? (
+            <>
+              <div className="card-report-grid">
+                {personCardReport.groups.map((group) => (
+                  <article key={group.card}>
+                    <strong>{group.card}</strong>
+                    <ul>
+                      {group.items.map((item, index) => {
+                        const installmentNumber = item.installmentNumber || getInstallmentNumber(item.description);
+                        return (
+                          <li key={`${item.date}-${item.description}-${index}`}>
+                            <span>{stripInstallmentSuffix(item.description)}</span>
+                            <b>
+                              {currency(Math.abs(item.amount))}
+                              {item.installments > 1 && ` - ${installmentNumber || 1}/${item.installments}`}
+                            </b>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    <div className="card-report-total">
+                      <span>Total</span>
+                      <strong>{currency(group.total)}</strong>
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="copy-report-button"
+                onClick={() => {
+                  navigator.clipboard?.writeText(personCardReport.text);
+                  setCopyStatus('Relatorio copiado.');
+                }}
+              >
+                Copiar relatorio
+              </button>
+              {copyStatus && <small className="copy-status">{copyStatus}</small>}
+            </>
+          ) : (
+            <p className="empty-value">Nenhum gasto encontrado para essa pessoa nesse filtro.</p>
+          )}
+        </section>
+      )}
 
       {borrowedSummary.length > 0 && (
         <div className="borrowed-summary">

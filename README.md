@@ -174,12 +174,14 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 - Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
 - No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. O padrao e `Valor de cada parcela`, para o app nao dividir novamente valores como `29,49`.
 - Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.
+- Use o campo `Primeira parcela` para retroativos. Exemplo: se a primeira parcela foi em marco, selecione `marco/2026` e o app projeta marco, abril, maio etc.
 - Se uma linha ja existir na planilha com `Parcelas` maior que `1`, o app tambem projeta essas parcelas nos meses seguintes ao carregar os dados.
 - Ao editar uma parcela projetada, o app edita a compra original da planilha e recalcula as parcelas.
+- Ao excluir uma parcela projetada, o app exclui a compra original e remove todas as parcelas daquele parcelamento.
 - A planilha deve guardar apenas a compra original. O app mostra as parcelas futuras automaticamente, no estilo `Parcela 1 de 3`, `Parcela 2 de 3`.
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra uso estimado por cartao e contas a receber de pessoas que usaram seu cartao.
-- Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Gabi, Alessandra ou outra pessoa usou.
+- Em `Lancamentos`, use os filtros por pessoa e por cartao para ver rapidamente tudo que Matheus, Gabi, Alessandra ou uma fatura especifica usou no mes. Ao filtrar uma pessoa, o app mostra um relatorio agrupado por cartao com itens e total de cada fatura.
 - `Matheus` e `Gabi` sao tratados como donos, entao nao entram no resumo de cartao emprestado. Valores de outras pessoas continuam aparecendo como emprestado.
 
 ## Relatorios e backup
