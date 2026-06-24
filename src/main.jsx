@@ -1921,6 +1921,8 @@ function Transactions({
   removeTransaction,
 }) {
   const [copyStatus, setCopyStatus] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const cardOptions = useMemo(
     () => [
       ...new Set([
@@ -1976,6 +1978,18 @@ function Transactions({
 
     return Object.entries(totals).map(([person, amount]) => ({ person, amount }));
   }, [transactions]);
+  const totalPages = pageSize === 'all' ? 1 : Math.max(Math.ceil(transactions.length / Number(pageSize)), 1);
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedTransactions =
+    pageSize === 'all'
+      ? transactions.map((item, index) => ({ item, originalIndex: index }))
+      : transactions
+          .map((item, index) => ({ item, originalIndex: index }))
+          .slice((safePage - 1) * Number(pageSize), safePage * Number(pageSize));
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [cardFilter, pageSize, personFilter, search, selectedMonth, transactions.length]);
 
   return (
     <div className="page">
@@ -2103,6 +2117,41 @@ function Transactions({
         </div>
       )}
 
+      <div className="pagination-bar">
+        <div>
+          <strong>{transactions.length}</strong>
+          <span> lancamentos encontrados</span>
+        </div>
+        <div className="pagination-controls">
+          <label>
+            Mostrar
+            <select
+              value={pageSize}
+              onChange={(event) => setPageSize(event.target.value === 'all' ? 'all' : Number(event.target.value))}
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+              <option value="all">Todos</option>
+            </select>
+          </label>
+          <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage((page) => Math.max(page - 1, 1))}>
+            Anterior
+          </button>
+          <span>
+            Pagina {safePage} de {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={safePage >= totalPages}
+            onClick={() => setCurrentPage((page) => Math.min(page + 1, totalPages))}
+          >
+            Proxima
+          </button>
+        </div>
+      </div>
+
       <div className="table-card">
         <table>
           <thead>
@@ -2119,8 +2168,8 @@ function Transactions({
             </tr>
           </thead>
           <tbody>
-            {transactions.map((item, index) => (
-              <tr key={`${item.date}-${item.description}-${index}`}>
+            {paginatedTransactions.map(({ item, originalIndex }) => (
+              <tr key={`${item.date}-${item.description}-${originalIndex}`}>
                 <td>{formatDate(item.date)}</td>
                 <td className={item.description === 'Nao informado' ? 'empty-value' : ''}>
                   <span className="transaction-title">{stripInstallmentSuffix(item.description)}</span>
@@ -2145,10 +2194,10 @@ function Transactions({
                   {item.installments > 1 && <small className="installments">/{item.installments}x</small>}
                 </td>
                 <td className="actions">
-                  <button type="button" onClick={() => editTransaction(index)}>
+                  <button type="button" onClick={() => editTransaction(originalIndex)}>
                     Editar
                   </button>
-                  <button type="button" onClick={() => removeTransaction(index)}>
+                  <button type="button" onClick={() => removeTransaction(originalIndex)}>
                     Excluir
                   </button>
                 </td>

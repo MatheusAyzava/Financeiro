@@ -183,6 +183,7 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tam
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra o total geral da fatura por cartao, incluindo valores seus, da Gabi e de outras pessoas. Quando houver gastos de terceiros, tambem mostra o total a receber separado.
 - Em `Lancamentos`, use os filtros por pessoa e por cartao para ver rapidamente tudo que Matheus, Gabi, Alessandra ou uma fatura especifica usou no mes. Ao filtrar uma pessoa, o app mostra um relatorio agrupado por cartao com itens e total de cada fatura.
+- A lista de `Lancamentos` tem paginacao e permite mostrar 25, 50, 100, 200 ou todos os lancamentos encontrados.
 - Ao filtrar um cartao especifico, o periodo passa a seguir o dia de fechamento cadastrado no cartao. Assim uma compra feita depois do fechamento entra na fatura do mes seguinte, como no aplicativo do banco.
 - `Matheus` e `Gabi` sao tratados como donos, entao nao entram no resumo de cartao emprestado. Valores de outras pessoas continuam aparecendo como emprestado.
 
