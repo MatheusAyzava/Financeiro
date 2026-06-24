@@ -587,6 +587,16 @@ progress {
   margin-left: 10px;
 }
 
+.billing-period-note {
+  background: var(--blue-soft);
+  border: 1px solid #cfe6fb;
+  border-radius: 12px;
+  color: #315b7d;
+  font-size: 13px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
 .table-card {
   overflow: auto;
 }

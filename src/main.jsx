@@ -765,6 +765,32 @@ function monthKey(value) {
   return value ? value.slice(0, 7) : '';
 }
 
+function sameCardName(left, right) {
+  return normalizeText(left).toLowerCase() === normalizeText(right).toLowerCase();
+}
+
+function getCardBillForTransaction(cardBills, transaction, selectedCard = '') {
+  return cardBills.find((cardBill) => {
+    if (selectedCard && selectedCard !== 'Todos' && selectedCard !== 'Sem cartao') {
+      return sameCardName(cardBill.name, selectedCard);
+    }
+
+    return sameCardName(cardBill.name, transaction.card) || sameCardName(cardBill.name, transaction.account);
+  });
+}
+
+function getTransactionBillingMonth(transaction, cardBills, selectedCard = '') {
+  const cardBill = getCardBillForTransaction(cardBills, transaction, selectedCard);
+
+  if (!cardBill) return monthKey(transaction.date);
+
+  const normalizedDate = normalizeDate(transaction.date);
+  const day = Number(normalizedDate.slice(8, 10)) || 1;
+  const closingDay = Number(cardBill.closingDay) || 1;
+
+  return day > closingDay ? monthKey(addMonths(normalizedDate, 1)) : monthKey(normalizedDate);
+}
+
 function App() {
   const [activePage, setActivePage] = useState('overview');
   const [transactions, setTransactions] = useState(() =>
@@ -844,6 +870,15 @@ function App() {
     () => transactions.filter((item) => monthKey(item.date) === selectedMonth),
     [transactions, selectedMonth],
   );
+  const transactionPeriodTransactions = useMemo(
+    () =>
+      transactions.filter((item) => {
+        if (cardFilter === 'Todos') return monthKey(item.date) === selectedMonth;
+        if (cardFilter === 'Sem cartao') return !item.card && monthKey(item.date) === selectedMonth;
+        return getTransactionBillingMonth(item, cardBills, cardFilter) === selectedMonth;
+      }),
+    [cardBills, cardFilter, selectedMonth, transactions],
+  );
 
   const summary = useMemo(() => {
     const income = monthlyTransactions
@@ -900,7 +935,7 @@ function App() {
 
   const filteredTransactions = useMemo(() => {
     const query = search.toLowerCase();
-    return monthlyTransactions.filter((item) => {
+    return transactionPeriodTransactions.filter((item) => {
       const matchesSearch = [item.description, item.category, item.account, item.person, item.card, item.status].some(
         (field) =>
           String(field || '')
@@ -913,7 +948,7 @@ function App() {
 
       return matchesSearch && matchesPerson && matchesCard;
     });
-  }, [cardFilter, monthlyTransactions, personFilter, search]);
+  }, [cardFilter, personFilter, search, transactionPeriodTransactions]);
 
   const dueItems = useMemo(() => getDueItems(cardBills, reminders, selectedMonth), [cardBills, reminders, selectedMonth]);
   const nextDueItems = useMemo(() => dueItems.filter((item) => !item.paid).slice(0, 4), [dueItems]);
@@ -1232,7 +1267,7 @@ function App() {
           {activePage === 'transactions' && (
             <Transactions
               transactions={filteredTransactions}
-              allTransactions={monthlyTransactions}
+              allTransactions={transactionPeriodTransactions}
               cards={cards}
               cardBills={cardBills}
               cardFilter={cardFilter}
@@ -1254,7 +1289,7 @@ function App() {
               removeCardBill={removeCardBill}
               receivables={receivables}
               selectedMonth={selectedMonth}
-              transactions={monthlyTransactions}
+              transactions={transactions}
               updateCardBill={updateCardBill}
             />
           )}
@@ -1876,6 +1911,12 @@ function Transactions({
         </label>
       </div>
 
+      {cardFilter !== 'Todos' && cardFilter !== 'Sem cartao' && (
+        <p className="billing-period-note">
+          Mostrando a fatura de {cardFilter} pelo dia de fechamento cadastrado, nao apenas pelo mes da compra.
+        </p>
+      )}
+
       {personFilter !== 'Todos' && (
         <section className="person-card-report">
           <div className="report-header">
@@ -2011,7 +2052,12 @@ function Transactions({
 function CardsPage({ cardBills, removeCardBill, receivables, selectedMonth, transactions, updateCardBill }) {
   const cardUsage = cardBills.map((card) => {
     const total = transactions
-      .filter((item) => item.amount < 0 && (item.card === card.name || item.account === card.name))
+      .filter(
+        (item) =>
+          item.amount < 0 &&
+          (sameCardName(item.card, card.name) || sameCardName(item.account, card.name)) &&
+          getTransactionBillingMonth(item, cardBills, card.name) === selectedMonth,
+      )
       .reduce((sum, item) => sum + Math.abs(item.amount), 0);
 
     return { ...card, total };
