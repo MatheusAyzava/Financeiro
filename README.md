@@ -163,14 +163,15 @@ Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app 
 Na tela `Planejamento`, voce pode cadastrar:
 
 - Cartoes com dia de fechamento e dia de vencimento, por exemplo Nubank vencendo dia 8.
-- Lembretes de contas recorrentes, por exemplo MEI, internet, aluguel, energia ou qualquer compromisso.
+- Despesas fixas de contas recorrentes, por exemplo aluguel, internet, MEI, energia ou qualquer compromisso mensal.
 - Metas financeiras, como reserva de emergencia, viagem ou quitar uma divida.
 - Dividas e emprestimos, separando valores a receber e valores a pagar.
 
-Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards de cartao, use `Editar vencimento` para alterar dia de vencimento, fechamento, nome e valor previsto. A `Visao Geral` tambem mostra os proximos vencimentos pendentes para evitar esquecer contas importantes.
+Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tambem mostra o total de despesas fixas do periodo. Nos cards de cartao, use `Editar vencimento` para alterar dia de vencimento, fechamento, nome e valor previsto. A `Visao Geral` tambem mostra os proximos vencimentos pendentes para evitar esquecer contas importantes.
 
 ## Cartoes, pessoas e parcelas
 
+- Receitas como `Salario` entram como credito, somam no saldo e nao usam campos de parcelas.
 - Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
 - No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. O padrao e `Valor de cada parcela`, para o app nao dividir novamente valores como `29,49`.
 - Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.

@@ -781,6 +781,22 @@ td {
   border-color: #c7f0df;
 }
 
+.fixed-expense-summary {
+  align-items: center;
+  background: var(--blue-soft);
+  border: 1px solid #cfe6fb;
+  border-radius: 14px;
+  color: #315b7d;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+
+.fixed-expense-summary strong {
+  color: var(--blue);
+  font-size: 22px;
+}
+
 .due-card h3 {
   margin: 0;
 }
@@ -1193,6 +1209,16 @@ td {
   gap: 8px;
   justify-content: center;
   padding: 10px;
+}
+
+.income-helper {
+  background: var(--green-soft);
+  border: 1px solid #c7f0df;
+  border-radius: 12px;
+  color: #16734a;
+  font-weight: 700;
+  margin: 0;
+  padding: 12px 14px;
 }
 
 .amount-field input {

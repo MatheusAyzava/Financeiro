@@ -18,7 +18,7 @@ const GOOGLE_SHEET_ID = import.meta.env.VITE_GOOGLE_SHEET_ID;
 const GOOGLE_SHEET_RANGE = import.meta.env.VITE_GOOGLE_SHEET_RANGE || 'Lancamentos!A:J';
 const GOOGLE_SCRIPT_URL = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 
-const accounts = ['Banco do Brasil', 'Nubank', 'Carteira'];
+const accounts = ['Banco do Brasil', 'Nubank'];
 const defaultCategories = [
   'Alimentacao',
   'Transporte',
@@ -143,6 +143,7 @@ const defaultCardBills = [
 ];
 
 const defaultReminders = [
+  { id: 'reminder-rent', title: 'Aluguel', dueDay: 5, amount: 0, recurrence: 'Mensal', paidMonths: [] },
   { id: 'reminder-mei', title: 'Pagar MEI', dueDay: 20, amount: 76.9, recurrence: 'Mensal', paidMonths: [] },
   { id: 'reminder-internet', title: 'Internet', dueDay: 10, amount: 99.9, recurrence: 'Mensal', paidMonths: [] },
 ];
@@ -178,11 +179,11 @@ function getDefaultTransaction() {
     firstInstallmentMonth: getDefaultFirstInstallmentMonth(today(), 'expense'),
     description: '',
     category: 'Alimentacao',
-    account: 'Carteira',
+    account: 'Banco do Brasil',
     amount: '',
     person: 'Matheus',
     card: '',
-    status: 'Debito',
+    status: 'Credito',
     installments: 1,
     notes: '',
   };
@@ -508,7 +509,7 @@ function getDueItems(cardBills, reminders, selectedMonth) {
 
     return {
       ...item,
-      kind: 'Lembrete',
+      kind: 'Despesa fixa',
       dueDate,
       paid,
       status: getDueStatus(dueDate, paid),
@@ -544,6 +545,21 @@ function extractSheetId(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function normalizeLookupText(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function isIncomeDraft(transaction) {
+  const text = `${normalizeLookupText(transaction.description)} ${normalizeLookupText(transaction.category)}`;
+  return (
+    transaction.type === 'income' ||
+    ['salario', 'receita', 'entrada', 'pix recebido'].some((keyword) => text.includes(keyword))
+  );
 }
 
 function parseCurrency(value) {
@@ -1571,10 +1587,19 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
       status: initialTransaction.status || (initialTransaction.amount >= 0 ? 'Credito' : 'Debito'),
     };
   });
+  const isIncome = isIncomeDraft(draft);
 
   function updateDraft(field, value) {
     setDraft((current) => {
       const next = { ...current, [field]: value };
+
+      if (['description', 'category'].includes(field) && isIncomeDraft(next)) {
+        next.type = 'income';
+        next.status = 'Credito';
+        next.amountMode = 'total';
+        next.installments = 1;
+        next.firstInstallmentMonth = getDefaultFirstInstallmentMonth(next.date, 'income');
+      }
 
       if (field === 'date') {
         const currentDefault = getDefaultFirstInstallmentMonth(current.date, current.type);
@@ -1598,6 +1623,8 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
           !current.firstInstallmentMonth || current.firstInstallmentMonth === currentDefault
             ? getDefaultFirstInstallmentMonth(current.date, type)
             : current.firstInstallmentMonth,
+        amountMode: type === 'income' ? 'total' : current.amountMode,
+        installments: type === 'income' ? 1 : current.installments,
         status: type === 'income' ? 'Credito' : 'Debito',
       };
     });
@@ -1605,14 +1632,24 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
 
   function handleSubmit(event) {
     event.preventDefault();
+    const transactionType = isIncomeDraft(draft) ? 'income' : draft.type;
     const amount = Math.abs(parseCurrency(draft.amount));
-    const signedAmount = draft.type === 'income' ? amount : -amount;
-    const status = draft.status || (draft.type === 'income' ? 'Credito' : 'Debito');
+    const signedAmount = transactionType === 'income' ? amount : -amount;
+    const status = transactionType === 'income' ? 'Credito' : draft.status || 'Debito';
+    const installments = transactionType === 'income' ? 1 : draft.installments;
 
     onSave({
       ...draft,
+      type: transactionType,
       amount: signedAmount,
-      notes: withInstallmentMetadata(draft.notes, draft.amountMode, draft.firstInstallmentMonth, draft.installments),
+      amountMode: transactionType === 'income' ? 'total' : draft.amountMode,
+      installments,
+      notes: withInstallmentMetadata(
+        draft.notes,
+        transactionType === 'income' ? 'total' : draft.amountMode,
+        draft.firstInstallmentMonth,
+        installments,
+      ),
       status,
     });
   }
@@ -1633,7 +1670,7 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
         <div className="type-toggle">
           <label>
             <input
-              checked={draft.type !== 'income'}
+              checked={!isIncome}
               name="transaction-type"
               type="radio"
               onChange={() => updateType('expense')}
@@ -1642,7 +1679,7 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
           </label>
           <label>
             <input
-              checked={draft.type === 'income'}
+              checked={isIncome}
               name="transaction-type"
               type="radio"
               onChange={() => updateType('income')}
@@ -1663,26 +1700,29 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
           />
         </label>
 
-        <div className="amount-mode-toggle">
-          <label>
-            <input
-              checked={draft.amountMode !== 'installment'}
-              name="amount-mode"
-              type="radio"
-              onChange={() => updateDraft('amountMode', 'total')}
-            />
-            Valor total da compra
-          </label>
-          <label>
-            <input
-              checked={draft.amountMode === 'installment'}
-              name="amount-mode"
-              type="radio"
-              onChange={() => updateDraft('amountMode', 'installment')}
-            />
-            Valor de cada parcela
-          </label>
-        </div>
+        {!isIncome && (
+          <div className="amount-mode-toggle">
+            <label>
+              <input
+                checked={draft.amountMode !== 'installment'}
+                name="amount-mode"
+                type="radio"
+                onChange={() => updateDraft('amountMode', 'total')}
+              />
+              Valor total da compra
+            </label>
+            <label>
+              <input
+                checked={draft.amountMode === 'installment'}
+                name="amount-mode"
+                type="radio"
+                onChange={() => updateDraft('amountMode', 'installment')}
+              />
+              Valor de cada parcela
+            </label>
+          </div>
+        )}
+        {isIncome && <p className="income-helper">Receita entra como credito e soma no saldo. Parcelas ficam desativadas.</p>}
 
         <div className="form-grid">
           <label>
@@ -1733,31 +1773,39 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
           </label>
           <label>
             Status
-            <select value={draft.status} onChange={(event) => updateDraft('status', event.target.value)}>
-              <option>Debito</option>
+            <select
+              disabled={isIncome}
+              value={isIncome ? 'Credito' : draft.status}
+              onChange={(event) => updateDraft('status', event.target.value)}
+            >
               <option>Credito</option>
+              <option>Debito</option>
             </select>
           </label>
-          <label>
-            Parcelas
-            <input
-              max="60"
-              min="1"
-              type="number"
-              value={draft.installments}
-              onChange={(event) => updateDraft('installments', event.target.value)}
-            />
-            <small>Despesas parceladas entram a partir do mes seguinte, ate 60x.</small>
-          </label>
-          <label>
-            Primeira parcela
-            <input
-              type="month"
-              value={draft.firstInstallmentMonth}
-              onChange={(event) => updateDraft('firstInstallmentMonth', event.target.value)}
-            />
-            <small>Use para parcelamentos retroativos, como primeira parcela em marco.</small>
-          </label>
+          {!isIncome && (
+            <>
+              <label>
+                Parcelas
+                <input
+                  max="60"
+                  min="1"
+                  type="number"
+                  value={draft.installments}
+                  onChange={(event) => updateDraft('installments', event.target.value)}
+                />
+                <small>Despesas parceladas entram a partir do mes seguinte, ate 60x.</small>
+              </label>
+              <label>
+                Primeira parcela
+                <input
+                  type="month"
+                  value={draft.firstInstallmentMonth}
+                  onChange={(event) => updateDraft('firstInstallmentMonth', event.target.value)}
+                />
+                <small>Use para parcelamentos retroativos, como primeira parcela em marco.</small>
+              </label>
+            </>
+          )}
         </div>
 
         <label>
@@ -2229,6 +2277,8 @@ function Planning({
   setSelectedMonth,
 }) {
   const budgetRows = getBudgetRows(expensesByCategory);
+  const fixedExpenseItems = dueItems.filter((item) => item.kind === 'Despesa fixa');
+  const fixedExpensesTotal = fixedExpenseItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
 
   return (
     <div className="page">
@@ -2255,9 +2305,14 @@ function Planning({
       <section className="planning-section">
         <div className="section-heading">
           <div>
-            <h2>Vencimentos e lembretes</h2>
-            <p>Faturas, MEI e outras contas para nao deixar passar.</p>
+            <h2>Despesas fixas e vencimentos</h2>
+            <p>Aluguel, internet, MEI, faturas e outras contas recorrentes.</p>
           </div>
+        </div>
+
+        <div className="fixed-expense-summary">
+          <span>Total de despesas fixas no periodo</span>
+          <strong>{currency(fixedExpensesTotal)}</strong>
         </div>
 
         <div className="due-grid">
@@ -2510,7 +2565,7 @@ function CardBillForm({ onAdd }) {
 }
 
 function ReminderForm({ onAdd }) {
-  const [draft, setDraft] = useState({ title: '', dueDay: 20, amount: '', recurrence: 'Mensal' });
+  const [draft, setDraft] = useState({ title: '', dueDay: 10, amount: '', recurrence: 'Mensal' });
 
   function updateDraft(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -2519,16 +2574,16 @@ function ReminderForm({ onAdd }) {
   function handleSubmit(event) {
     event.preventDefault();
     onAdd(draft);
-    setDraft({ title: '', dueDay: 20, amount: '', recurrence: 'Mensal' });
+    setDraft({ title: '', dueDay: 10, amount: '', recurrence: 'Mensal' });
   }
 
   return (
     <form className="mini-form" onSubmit={handleSubmit}>
-      <h3>Novo lembrete</h3>
+      <h3>Nova despesa fixa</h3>
       <label>
-        Conta ou compromisso
+        Nome da despesa
         <input
-          placeholder="Ex: Pagar MEI"
+          placeholder="Ex: Aluguel, Internet, MEI"
           required
           value={draft.title}
           onChange={(event) => updateDraft('title', event.target.value)}
@@ -2564,7 +2619,7 @@ function ReminderForm({ onAdd }) {
           onChange={(event) => updateDraft('amount', event.target.value)}
         />
       </label>
-      <button type="submit">Adicionar lembrete</button>
+      <button type="submit">Adicionar despesa fixa</button>
     </form>
   );
 }
