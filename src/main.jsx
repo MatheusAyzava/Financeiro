@@ -1077,8 +1077,10 @@ function App() {
               personFilter={personFilter}
               search={search}
               editTransaction={editTransaction}
+              selectedMonth={selectedMonth}
               setPersonFilter={setPersonFilter}
               setSearch={setSearch}
+              setSelectedMonth={setSelectedMonth}
               removeTransaction={removeTransaction}
             />
           )}
@@ -1535,7 +1537,18 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
   );
 }
 
-function Transactions({ transactions, people, personFilter, search, editTransaction, setPersonFilter, setSearch, removeTransaction }) {
+function Transactions({
+  transactions,
+  people,
+  personFilter,
+  search,
+  editTransaction,
+  selectedMonth,
+  setPersonFilter,
+  setSearch,
+  setSelectedMonth,
+  removeTransaction,
+}) {
   const borrowedSummary = useMemo(() => {
     const totals = transactions
       .filter((item) => item.amount < 0 && item.person && item.person.toLowerCase() !== 'eu')
@@ -1553,6 +1566,10 @@ function Transactions({ transactions, people, personFilter, search, editTransact
         <div>
           <h1>Meus Lancamentos</h1>
         </div>
+        <label className="month-label">
+          Periodo:
+          <input type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
+        </label>
       </div>
 
       <div className="toolbar">
