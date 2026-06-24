@@ -172,6 +172,7 @@ function today() {
 function getDefaultTransaction() {
   return {
     type: 'expense',
+    amountMode: 'total',
     date: today(),
     description: '',
     category: 'Alimentacao',
@@ -183,6 +184,21 @@ function getDefaultTransaction() {
     installments: 1,
     notes: '',
   };
+}
+
+const INSTALLMENT_VALUE_MARKER = '[valor-parcela]';
+
+function isInstallmentValueMode(notes) {
+  return normalizeText(notes).includes(INSTALLMENT_VALUE_MARKER);
+}
+
+function cleanInstallmentValueMarker(notes) {
+  return normalizeText(notes).replace(INSTALLMENT_VALUE_MARKER, '').trim();
+}
+
+function withInstallmentValueMarker(notes, amountMode) {
+  const cleanNotes = cleanInstallmentValueMarker(notes);
+  return amountMode === 'installment' ? `${INSTALLMENT_VALUE_MARKER} ${cleanNotes}`.trim() : cleanNotes;
 }
 
 function normalizeTransaction(transaction) {
@@ -247,7 +263,8 @@ function expandInstallments(transaction) {
 
   if (installments === 1) return [normalizeTransaction(transaction)];
 
-  const installmentAmount = transaction.amount / installments;
+  const isInstallmentValue = transaction.amountMode === 'installment' || isInstallmentValueMode(transaction.notes);
+  const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
   const startsNextMonth = transaction.amount < 0;
 
   return Array.from({ length: installments }, (_, index) =>
@@ -273,7 +290,8 @@ function expandSheetInstallments(transaction) {
     return [transaction];
   }
 
-  const installmentAmount = transaction.amount / installments;
+  const isInstallmentValue = isInstallmentValueMode(transaction.notes);
+  const installmentAmount = isInstallmentValue ? transaction.amount : transaction.amount / installments;
 
   return Array.from({ length: installments }, (_, index) =>
     ({
@@ -1365,7 +1383,9 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
     return {
       ...initialTransaction,
       amount: Math.abs(initialTransaction.amount),
+      amountMode: isInstallmentValueMode(initialTransaction.notes) ? 'installment' : 'total',
       type: initialTransaction.amount >= 0 ? 'income' : 'expense',
+      notes: cleanInstallmentValueMarker(initialTransaction.notes),
       status: initialTransaction.status || (initialTransaction.amount >= 0 ? 'Credito' : 'Debito'),
     };
   });
@@ -1391,6 +1411,7 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
     onSave({
       ...draft,
       amount: signedAmount,
+      notes: withInstallmentValueMarker(draft.notes, draft.amountMode),
       status,
     });
   }
@@ -1440,6 +1461,27 @@ function TransactionModal({ cards, categories, initialTransaction, people, onClo
             onChange={(event) => updateDraft('amount', event.target.value)}
           />
         </label>
+
+        <div className="amount-mode-toggle">
+          <label>
+            <input
+              checked={draft.amountMode !== 'installment'}
+              name="amount-mode"
+              type="radio"
+              onChange={() => updateDraft('amountMode', 'total')}
+            />
+            Valor total da compra
+          </label>
+          <label>
+            <input
+              checked={draft.amountMode === 'installment'}
+              name="amount-mode"
+              type="radio"
+              onChange={() => updateDraft('amountMode', 'installment')}
+            />
+            Valor de cada parcela
+          </label>
+        </div>
 
         <div className="form-grid">
           <label>
