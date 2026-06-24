@@ -262,6 +262,30 @@ function expandInstallments(transaction) {
   );
 }
 
+function isExpandedInstallment(description, installments) {
+  return new RegExp(`\\(\\d+/${installments}\\)$`).test(normalizeText(description));
+}
+
+function expandSheetInstallments(transaction) {
+  const installments = Math.max(Number(transaction.installments) || 1, 1);
+
+  if (installments === 1 || isExpandedInstallment(transaction.description, installments)) {
+    return [transaction];
+  }
+
+  const installmentAmount = transaction.amount / installments;
+
+  return Array.from({ length: installments }, (_, index) =>
+    normalizeTransaction({
+      ...transaction,
+      date: addMonths(transaction.date, transaction.amount < 0 ? index + 1 : index),
+      amount: installmentAmount,
+      description: `${transaction.description} (${index + 1}/${installments})`,
+      sheetRow: transaction.sheetRow,
+    }),
+  );
+}
+
 function getMonthlyMetrics(transactions, month) {
   const monthly = transactions.filter((item) => monthKey(item.date) === month);
   const income = monthly.filter((item) => item.amount > 0).reduce((total, item) => total + item.amount, 0);
@@ -413,8 +437,8 @@ function parseSheetRows(rows) {
     .map((row, index) => ({ row, sheetRow: index + 1 }))
     .slice(1)
     .filter(({ row }) => row.some(Boolean))
-    .map(({ row, sheetRow }) =>
-      normalizeTransaction({
+    .flatMap(({ row, sheetRow }) => {
+      const transaction = normalizeTransaction({
         date: row[0],
         description: row[1],
         category: row[2],
@@ -426,8 +450,10 @@ function parseSheetRows(rows) {
         installments: row[8],
         notes: row[9],
         sheetRow,
-      }),
-    );
+      });
+
+      return expandSheetInstallments(transaction);
+    });
 }
 
 function fetchScriptJsonp(scriptUrl, params = {}) {

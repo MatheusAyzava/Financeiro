@@ -172,6 +172,7 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 ## Cartoes, pessoas e parcelas
 
 - Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
+- Se uma linha ja existir na planilha com `Parcelas` maior que `1`, o app tambem projeta essas parcelas nos meses seguintes ao carregar os dados.
 - O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra uso estimado por cartao e contas a receber de pessoas que usaram seu cartao.
 - Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Alessandra ou outra pessoa usou.
