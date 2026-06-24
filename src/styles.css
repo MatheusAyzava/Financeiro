@@ -586,12 +586,14 @@ td {
   white-space: nowrap;
 }
 
+.status-pill.credito,
 .status-pill.pago,
 .status-pill.reembolsado {
   background: var(--green-soft);
   color: var(--green);
 }
 
+.status-pill.debito,
 .status-pill.pendente,
 .status-pill.a-receber {
   background: var(--red-soft);

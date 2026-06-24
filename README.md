@@ -50,12 +50,12 @@ Data | Descricao | Categoria | Conta | Valor | Quem usou | Cartao | Status | Par
 Exemplo:
 
 ```text
-2026-06-23 | Supermercado | Alimentacao | Banco do Brasil | -1400 | Eu | Nubank | Pago | 1 |
-2026-06-23 | Combustivel | Transporte | Banco do Brasil | -200 | Matheus | Banco do Brasil | Pendente | 1 | Emprestei o cartao
-2026-06-15 | Salario | Salario | Banco do Brasil | 3150 | Eu | | Pago | 1 |
+2026-06-23 | Supermercado | Alimentacao | Banco do Brasil | -1400 | Eu | Nubank | Debito | 1 |
+2026-06-23 | Combustivel | Transporte | Banco do Brasil | -200 | Matheus | Banco do Brasil | Debito | 1 | Emprestei o cartao
+2026-06-15 | Salario | Salario | Banco do Brasil | 3150 | Eu | | Credito | 1 |
 ```
 
-Valores positivos entram como receita. Valores negativos entram como despesa.
+Valores positivos entram como receita e normalmente usam status `Credito`. Valores negativos entram como despesa e normalmente usam status `Debito`.
 
 ## Gravar novos lancamentos no Google Sheets
 
@@ -131,6 +131,16 @@ function doPost(e) {
     }
   }
 
+  if (payload.action === 'updateTransaction') {
+    const row = Number(payload.sheetRow);
+    const transaction = payload.transaction || [];
+
+    if (row > 1 && row <= sheet.getLastRow()) {
+      sheet.getRange(row, 1, 1, 10).setValues([transaction]);
+      return ContentService.createTextOutput('updated');
+    }
+  }
+
   return ContentService.createTextOutput('ignored');
 }
 ```
@@ -146,7 +156,7 @@ function doPost(e) {
 VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
 ```
 
-Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, exclusoes feitas no app tambem removerao a linha correspondente da planilha, e todos os dispositivos passarao a carregar os lancamentos direto do Apps Script.
+Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, edicoes atualizarao a linha correspondente, exclusoes feitas no app tambem removerao a linha correspondente da planilha, e todos os dispositivos passarao a carregar os lancamentos direto do Apps Script.
 
 ## Vencimentos e lembretes
 
@@ -161,7 +171,8 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. Nos cards 
 
 ## Cartoes, pessoas e parcelas
 
-- Ao cadastrar um lancamento parcelado, o app cria automaticamente uma parcela por mes.
+- Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
+- O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
 - A tela `Cartoes` mostra uso estimado por cartao e contas a receber de pessoas que usaram seu cartao.
 - Em `Lancamentos`, o filtro por pessoa ajuda a ver rapidamente tudo que Matheus, Alessandra ou outra pessoa usou.
 

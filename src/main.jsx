@@ -171,6 +171,7 @@ function today() {
 
 function getDefaultTransaction() {
   return {
+    type: 'expense',
     date: today(),
     description: '',
     category: 'Alimentacao',
@@ -178,22 +179,30 @@ function getDefaultTransaction() {
     amount: '',
     person: 'Eu',
     card: '',
-    status: 'Pago',
+    status: 'Debito',
     installments: 1,
     notes: '',
   };
 }
 
 function normalizeTransaction(transaction) {
+  const amount = Number(transaction.amount) || 0;
+  const rawStatus = normalizeText(transaction.status);
+  const normalizedStatus = ['Credito', 'Debito'].includes(rawStatus)
+    ? rawStatus
+    : amount >= 0
+      ? 'Credito'
+      : 'Debito';
+
   return {
     date: normalizeDate(transaction.date),
     description: normalizeText(transaction.description) || 'Nao informado',
     category: normalizeText(transaction.category) || 'Sem categoria',
     account: normalizeText(transaction.account) || 'Sem conta',
-    amount: Number(transaction.amount) || 0,
+    amount,
     person: normalizeText(transaction.person) || 'Eu',
     card: normalizeText(transaction.card),
-    status: normalizeText(transaction.status) || 'Pago',
+    status: normalizedStatus,
     installments: Number(transaction.installments) || 1,
     notes: normalizeText(transaction.notes),
     sheetRow: transaction.sheetRow ? Number(transaction.sheetRow) : null,
@@ -239,11 +248,12 @@ function expandInstallments(transaction) {
   if (installments === 1) return [normalizeTransaction(transaction)];
 
   const installmentAmount = transaction.amount / installments;
+  const startsNextMonth = transaction.amount < 0;
 
   return Array.from({ length: installments }, (_, index) =>
     normalizeTransaction({
       ...transaction,
-      date: addMonths(transaction.date, index),
+      date: addMonths(transaction.date, startsNextMonth ? index + 1 : index),
       amount: installmentAmount,
       description: `${transaction.description || 'Lancamento'} (${index + 1}/${installments})`,
       installments,
@@ -537,6 +547,37 @@ async function deleteTransactionFromSheet(config, transaction) {
   });
 }
 
+async function updateTransactionInSheet(config, transaction) {
+  const scriptUrl = normalizeText(config.scriptUrl);
+  if (!scriptUrl) return;
+
+  const payload = JSON.stringify({
+    action: 'updateTransaction',
+    sheetRow: transaction.sheetRow,
+    transaction: [
+      transaction.date,
+      transaction.description,
+      transaction.category,
+      transaction.account,
+      transaction.amount,
+      transaction.person,
+      transaction.card,
+      transaction.status,
+      transaction.installments,
+      transaction.notes,
+    ],
+  });
+
+  await fetch(scriptUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+    },
+    body: new URLSearchParams({ payload }),
+  });
+}
+
 function currency(value) {
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
@@ -566,6 +607,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useState('Usando dados de exemplo.');
   const [sheetsConfig, setSheetsConfig] = useState(getInitialSheetsConfig);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState(null);
   const [people, setPeople] = useState(() => getSavedList('fincontrol:people', defaultPeople));
   const [cards, setCards] = useState(() => getSavedList('fincontrol:cards', defaultCards));
   const [cardBills, setCardBills] = useState(() => getSavedItems('fincontrol:card-bills', defaultCardBills));
@@ -733,11 +775,48 @@ function App() {
   }
 
   function addTransaction() {
+    setEditingTransaction(null);
+    setActivePage('transactions');
+    setIsTransactionModalOpen(true);
+  }
+
+  function closeTransactionModal() {
+    setEditingTransaction(null);
+    setIsTransactionModalOpen(false);
+  }
+
+  function editTransaction(indexToEdit) {
+    setEditingTransaction(filteredTransactions[indexToEdit]);
     setActivePage('transactions');
     setIsTransactionModalOpen(true);
   }
 
   function saveTransaction(transaction) {
+    if (editingTransaction) {
+      const amount = Number(transaction.amount) || 0;
+      const normalized = normalizeTransaction({
+        ...transaction,
+        amount,
+        sheetRow: editingTransaction.sheetRow,
+      });
+      const nextTransactions = transactions.map((item) => (item === editingTransaction ? normalized : item));
+
+      setTransactions(nextTransactions);
+      saveItems('fincontrol:transactions', nextTransactions);
+      setEditingTransaction(null);
+      setIsTransactionModalOpen(false);
+
+      updateTransactionInSheet(sheetsConfig, normalized)
+        .then(() => {
+          if (sheetsConfig.scriptUrl) {
+            setSyncStatus('Lancamento atualizado no Google Sheets.');
+            refreshSheetSoon();
+          }
+        })
+        .catch(() => setSyncStatus('Lancamento atualizado no app, mas nao foi atualizado na planilha.'));
+      return;
+    }
+
     const installments = expandInstallments(transaction);
     const nextTransactions = [...installments, ...transactions];
     setTransactions(nextTransactions);
@@ -971,6 +1050,7 @@ function App() {
               people={people}
               personFilter={personFilter}
               search={search}
+              editTransaction={editTransaction}
               setPersonFilter={setPersonFilter}
               setSearch={setSearch}
               removeTransaction={removeTransaction}
@@ -1027,8 +1107,9 @@ function App() {
         <TransactionModal
           cards={cards}
           categories={defaultCategories}
+          initialTransaction={editingTransaction}
           people={people}
-          onClose={() => setIsTransactionModalOpen(false)}
+          onClose={closeTransactionModal}
           onSave={saveTransaction}
         />
       )}
@@ -1237,21 +1318,40 @@ function Panel({ title, children }) {
   );
 }
 
-function TransactionModal({ cards, categories, people, onClose, onSave }) {
-  const [draft, setDraft] = useState(getDefaultTransaction);
+function TransactionModal({ cards, categories, initialTransaction, people, onClose, onSave }) {
+  const [draft, setDraft] = useState(() => {
+    if (!initialTransaction) return getDefaultTransaction();
+
+    return {
+      ...initialTransaction,
+      amount: Math.abs(initialTransaction.amount),
+      type: initialTransaction.amount >= 0 ? 'income' : 'expense',
+      status: initialTransaction.status || (initialTransaction.amount >= 0 ? 'Credito' : 'Debito'),
+    };
+  });
 
   function updateDraft(field, value) {
     setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateType(type) {
+    setDraft((current) => ({
+      ...current,
+      type,
+      status: type === 'income' ? 'Credito' : 'Debito',
+    }));
   }
 
   function handleSubmit(event) {
     event.preventDefault();
     const amount = Math.abs(parseCurrency(draft.amount));
     const signedAmount = draft.type === 'income' ? amount : -amount;
+    const status = draft.status || (draft.type === 'income' ? 'Credito' : 'Debito');
 
     onSave({
       ...draft,
       amount: signedAmount,
+      status,
     });
   }
 
@@ -1260,8 +1360,8 @@ function TransactionModal({ cards, categories, people, onClose, onSave }) {
       <form className="transaction-modal" onSubmit={handleSubmit}>
         <div className="modal-header">
           <div>
-            <h2>Novo lancamento</h2>
-            <p>Registre compra, receita ou uso emprestado do cartao.</p>
+            <h2>{initialTransaction ? 'Editar lancamento' : 'Novo lancamento'}</h2>
+            <p>{initialTransaction ? 'Edite os dados deste lancamento.' : 'Registre compra, receita ou uso emprestado do cartao.'}</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar">
             x
@@ -1274,7 +1374,7 @@ function TransactionModal({ cards, categories, people, onClose, onSave }) {
               checked={draft.type !== 'income'}
               name="transaction-type"
               type="radio"
-              onChange={() => updateDraft('type', 'expense')}
+              onChange={() => updateType('expense')}
             />
             Despesa
           </label>
@@ -1283,7 +1383,7 @@ function TransactionModal({ cards, categories, people, onClose, onSave }) {
               checked={draft.type === 'income'}
               name="transaction-type"
               type="radio"
-              onChange={() => updateDraft('type', 'income')}
+              onChange={() => updateType('income')}
             />
             Receita
           </label>
@@ -1351,20 +1451,20 @@ function TransactionModal({ cards, categories, people, onClose, onSave }) {
           <label>
             Status
             <select value={draft.status} onChange={(event) => updateDraft('status', event.target.value)}>
-              <option>Pago</option>
-              <option>Pendente</option>
-              <option>A receber</option>
-              <option>Reembolsado</option>
+              <option>Debito</option>
+              <option>Credito</option>
             </select>
           </label>
           <label>
             Parcelas
             <input
+              max="60"
               min="1"
               type="number"
               value={draft.installments}
               onChange={(event) => updateDraft('installments', event.target.value)}
             />
+            <small>Despesas parceladas entram a partir do mes seguinte, ate 60x.</small>
           </label>
         </div>
 
@@ -1402,14 +1502,14 @@ function TransactionModal({ cards, categories, people, onClose, onSave }) {
           <button type="button" onClick={onClose}>
             Cancelar
           </button>
-          <button type="submit">Salvar lancamento</button>
+          <button type="submit">{initialTransaction ? 'Salvar alteracoes' : 'Salvar lancamento'}</button>
         </div>
       </form>
     </div>
   );
 }
 
-function Transactions({ transactions, people, personFilter, search, setPersonFilter, setSearch, removeTransaction }) {
+function Transactions({ transactions, people, personFilter, search, editTransaction, setPersonFilter, setSearch, removeTransaction }) {
   const borrowedSummary = useMemo(() => {
     const totals = transactions
       .filter((item) => item.amount < 0 && item.person && item.person.toLowerCase() !== 'eu')
@@ -1498,7 +1598,9 @@ function Transactions({ transactions, people, personFilter, search, setPersonFil
                   {item.installments > 1 && <small className="installments">/{item.installments}x</small>}
                 </td>
                 <td className="actions">
-                  <button type="button">Editar</button>
+                  <button type="button" onClick={() => editTransaction(index)}>
+                    Editar
+                  </button>
                   <button type="button" onClick={() => removeTransaction(index)}>
                     Excluir
                   </button>
