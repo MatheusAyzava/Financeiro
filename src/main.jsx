@@ -519,6 +519,25 @@ function getDueItems(cardBills, reminders, selectedMonth) {
   return [...cardsDue, ...remindersDue].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 }
 
+function getFixedExpenseTransactions(reminders, selectedMonth) {
+  return reminders
+    .filter((item) => parseCurrency(item.amount) > 0)
+    .map((item) =>
+      normalizeTransaction({
+        date: getMonthDueDate(selectedMonth, item.dueDay),
+        description: item.title,
+        category: 'Despesas Fixas',
+        account: 'Despesa fixa',
+        amount: -Math.abs(parseCurrency(item.amount)),
+        person: 'Matheus',
+        card: '',
+        status: 'Debito',
+        installments: 1,
+        notes: 'Gerado a partir de despesa fixa',
+      }),
+    );
+}
+
 function getInitialSheetsConfig() {
   const saved = localStorage.getItem('fincontrol:sheets-config');
   let localConfig = {};
@@ -895,6 +914,14 @@ function App() {
     () => transactions.filter((item) => monthKey(item.date) === selectedMonth),
     [transactions, selectedMonth],
   );
+  const fixedExpenseTransactions = useMemo(
+    () => getFixedExpenseTransactions(reminders, selectedMonth),
+    [reminders, selectedMonth],
+  );
+  const monthlyFinancialTransactions = useMemo(
+    () => [...monthlyTransactions, ...fixedExpenseTransactions],
+    [fixedExpenseTransactions, monthlyTransactions],
+  );
   const transactionPeriodTransactions = useMemo(
     () =>
       transactions.filter((item) => {
@@ -906,13 +933,15 @@ function App() {
   );
 
   const summary = useMemo(() => {
-    const income = monthlyTransactions
+    const income = monthlyFinancialTransactions
       .filter((item) => item.amount > 0)
       .reduce((total, item) => total + item.amount, 0);
-    const expenses = monthlyTransactions
+    const expenses = monthlyFinancialTransactions
       .filter((item) => item.amount < 0)
       .reduce((total, item) => total + Math.abs(item.amount), 0);
-    const totalBalance = transactions.reduce((total, item) => total + item.amount, 0);
+    const totalBalance =
+      transactions.reduce((total, item) => total + item.amount, 0) +
+      fixedExpenseTransactions.reduce((total, item) => total + item.amount, 0);
 
     return {
       income,
@@ -920,7 +949,7 @@ function App() {
       monthBalance: income - expenses,
       totalBalance,
     };
-  }, [monthlyTransactions, transactions]);
+  }, [fixedExpenseTransactions, monthlyFinancialTransactions, transactions]);
 
   const accountBalances = useMemo(
     () =>
@@ -934,7 +963,7 @@ function App() {
   );
 
   const expensesByCategory = useMemo(() => {
-    const totals = monthlyTransactions
+    const totals = monthlyFinancialTransactions
       .filter((item) => item.amount < 0)
       .reduce((acc, item) => {
         acc[item.category] = (acc[item.category] || 0) + Math.abs(item.amount);
@@ -944,10 +973,10 @@ function App() {
     return Object.entries(totals)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
-  }, [monthlyTransactions]);
+  }, [monthlyFinancialTransactions]);
 
   const dailyCashflow = useMemo(() => {
-    const totals = monthlyTransactions.reduce((acc, item) => {
+    const totals = monthlyFinancialTransactions.reduce((acc, item) => {
       const label = formatDate(item.date).slice(0, 5);
       acc[label] = (acc[label] || 0) + item.amount;
       return acc;
@@ -956,7 +985,7 @@ function App() {
     return Object.entries(totals)
       .map(([date, value]) => ({ date, value }))
       .reverse();
-  }, [monthlyTransactions]);
+  }, [monthlyFinancialTransactions]);
 
   const filteredTransactions = useMemo(() => {
     const query = search.toLowerCase();
@@ -1160,6 +1189,29 @@ function App() {
     saveItems('fincontrol:reminders', next);
   }
 
+  function updateReminder(reminderId, changes) {
+    const next = reminders.map((reminder) =>
+      reminder.id === reminderId
+        ? {
+            ...reminder,
+            title: normalizeText(changes.title) || reminder.title,
+            dueDay: Number(changes.dueDay) || reminder.dueDay,
+            amount: parseCurrency(changes.amount),
+            recurrence: normalizeText(changes.recurrence) || reminder.recurrence,
+          }
+        : reminder,
+    );
+
+    setReminders(next);
+    saveItems('fincontrol:reminders', next);
+  }
+
+  function removeReminder(reminderId) {
+    const next = reminders.filter((reminder) => reminder.id !== reminderId);
+    setReminders(next);
+    saveItems('fincontrol:reminders', next);
+  }
+
   function toggleDuePaid(item) {
     const updatePaidMonths = (current) => {
       const paidMonths = current.paidMonths || [];
@@ -1330,9 +1382,11 @@ function App() {
               addGoal={addGoal}
               addReminder={addReminder}
               removeCardBill={removeCardBill}
+              removeReminder={removeReminder}
               toggleDebtPaid={toggleDebtPaid}
               toggleDuePaid={toggleDuePaid}
               updateCardBill={updateCardBill}
+              updateReminder={updateReminder}
               selectedMonth={selectedMonth}
               setSelectedMonth={setSelectedMonth}
             />
@@ -2270,9 +2324,11 @@ function Planning({
   addGoal,
   addReminder,
   removeCardBill,
+  removeReminder,
   toggleDebtPaid,
   toggleDuePaid,
   updateCardBill,
+  updateReminder,
   selectedMonth,
   setSelectedMonth,
 }) {
@@ -2321,8 +2377,10 @@ function Planning({
               item={item}
               key={`${item.kind}-${item.id}`}
               onRemoveCard={removeCardBill}
+              onRemoveFixedExpense={removeReminder}
               onTogglePaid={toggleDuePaid}
               onUpdateCard={updateCardBill}
+              onUpdateFixedExpense={updateReminder}
             />
           ))}
         </div>
@@ -2403,13 +2461,15 @@ function Planning({
   );
 }
 
-function DueItemCard({ item, onRemoveCard, onTogglePaid, onUpdateCard }) {
+function DueItemCard({ item, onRemoveCard, onRemoveFixedExpense, onTogglePaid, onUpdateCard, onUpdateFixedExpense }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState({
     name: item.name || '',
+    title: item.title || '',
     dueDay: item.dueDay || 1,
     closingDay: item.closingDay || 1,
     amount: item.amount || '',
+    recurrence: item.recurrence || 'Mensal',
   });
 
   function updateDraft(field, value) {
@@ -2418,7 +2478,11 @@ function DueItemCard({ item, onRemoveCard, onTogglePaid, onUpdateCard }) {
 
   function handleSubmit(event) {
     event.preventDefault();
-    onUpdateCard(item.id, draft);
+    if (item.kind === 'Cartao') {
+      onUpdateCard(item.id, draft);
+    } else {
+      onUpdateFixedExpense(item.id, draft);
+    }
     setIsEditing(false);
   }
 
@@ -2473,6 +2537,55 @@ function DueItemCard({ item, onRemoveCard, onTogglePaid, onUpdateCard }) {
     );
   }
 
+  if (item.kind === 'Despesa fixa' && isEditing) {
+    return (
+      <form className={item.paid ? 'due-card paid' : 'due-card'} onSubmit={handleSubmit}>
+        <div className="due-card-top">
+          <span>Despesa fixa</span>
+          <strong>Editando</strong>
+        </div>
+        <label>
+          Nome
+          <input value={draft.title} onChange={(event) => updateDraft('title', event.target.value)} />
+        </label>
+        <div className="mini-form-grid">
+          <label>
+            Vence dia
+            <input
+              max="31"
+              min="1"
+              type="number"
+              value={draft.dueDay}
+              onChange={(event) => updateDraft('dueDay', event.target.value)}
+            />
+          </label>
+          <label>
+            Repeticao
+            <select value={draft.recurrence} onChange={(event) => updateDraft('recurrence', event.target.value)}>
+              <option>Mensal</option>
+              <option>Unica</option>
+              <option>Anual</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          Valor
+          <input
+            inputMode="decimal"
+            value={draft.amount}
+            onChange={(event) => updateDraft('amount', event.target.value)}
+          />
+        </label>
+        <div className="card-actions">
+          <button type="submit">Salvar</button>
+          <button type="button" onClick={() => setIsEditing(false)}>
+            Cancelar
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
     <article className={item.paid ? 'due-card paid' : 'due-card'}>
       <div className="due-card-top">
@@ -2493,6 +2606,16 @@ function DueItemCard({ item, onRemoveCard, onTogglePaid, onUpdateCard }) {
               Editar vencimento
             </button>
             <button type="button" onClick={() => onRemoveCard(item.id)}>
+              Remover
+            </button>
+          </>
+        )}
+        {item.kind === 'Despesa fixa' && (
+          <>
+            <button type="button" onClick={() => setIsEditing(true)}>
+              Editar
+            </button>
+            <button type="button" onClick={() => onRemoveFixedExpense(item.id)}>
               Remover
             </button>
           </>

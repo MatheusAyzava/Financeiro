@@ -167,7 +167,7 @@ Na tela `Planejamento`, voce pode cadastrar:
 - Metas financeiras, como reserva de emergencia, viagem ou quitar uma divida.
 - Dividas e emprestimos, separando valores a receber e valores a pagar.
 
-Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tambem mostra o total de despesas fixas do periodo. Nos cards de cartao, use `Editar vencimento` para alterar dia de vencimento, fechamento, nome e valor previsto. A `Visao Geral` tambem mostra os proximos vencimentos pendentes para evitar esquecer contas importantes.
+Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tambem mostra o total de despesas fixas do periodo, e essas despesas entram no resumo financeiro da `Visao Geral` como despesas do mes. Despesas fixas podem ser editadas ou removidas no proprio card. Nos cards de cartao, use `Editar vencimento` para alterar dia de vencimento, fechamento, nome e valor previsto. A `Visao Geral` tambem mostra os proximos vencimentos pendentes para evitar esquecer contas importantes.
 
 ## Cartoes, pessoas e parcelas
 
