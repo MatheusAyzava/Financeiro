@@ -226,7 +226,7 @@ function withInstallmentMetadata(notes, amountMode, firstInstallmentMonth, insta
 }
 
 function normalizeTransaction(transaction) {
-  const amount = Number(transaction.amount) || 0;
+  const amount = parseCurrency(transaction.amount);
   const rawStatus = normalizeText(transaction.status);
   const normalizedStatus = ['Credito', 'Debito'].includes(rawStatus)
     ? rawStatus
@@ -966,10 +966,8 @@ function App() {
 
   function saveTransaction(transaction) {
     if (editingTransaction) {
-      const amount = Number(transaction.amount) || 0;
       const normalized = normalizeTransaction({
         ...transaction,
-        amount,
         sheetRow: editingTransaction.sheetRow,
       });
       const nextTransactions =
