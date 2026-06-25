@@ -24,6 +24,8 @@ const defaultCategories = [
   'Transporte',
   'Saude',
   'Educacao',
+  'Animais',
+  'Eletronicos',
   'Despesas Pessoais',
   'Impostos e Taxas',
   'Salario',
@@ -264,6 +266,21 @@ function getSavedList(key, fallback) {
 
 function getSavedPeople() {
   return getSavedList('fincontrol:people', defaultPeople).filter((person) => person.toLowerCase() !== 'eu');
+}
+
+function mergeTextLists(...lists) {
+  const seen = new Set();
+
+  return lists
+    .flat()
+    .map(normalizeText)
+    .filter(Boolean)
+    .filter((item) => {
+      const key = normalizeLookupText(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function isOwnerPerson(person) {
@@ -850,6 +867,9 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [people, setPeople] = useState(getSavedPeople);
   const [cards, setCards] = useState(() => getSavedList('fincontrol:cards', defaultCards));
+  const [categories, setCategories] = useState(() =>
+    mergeTextLists(defaultCategories, getSavedList('fincontrol:categories', defaultCategories)),
+  );
   const [cardBills, setCardBills] = useState(() => getSavedItems('fincontrol:card-bills', defaultCardBills));
   const [reminders, setReminders] = useState(() => getSavedItems('fincontrol:reminders', defaultReminders));
   const [goals, setGoals] = useState(() => getSavedItems('fincontrol:goals', defaultGoals));
@@ -870,6 +890,9 @@ function App() {
         if (sheetTransactions?.length) {
           setTransactions(sheetTransactions);
           saveItems('fincontrol:transactions', sheetTransactions);
+          const nextCategories = mergeTextLists(categories, sheetTransactions.map((item) => item.category));
+          setCategories(nextCategories);
+          saveItems('fincontrol:categories', nextCategories);
           setSyncStatus('Dados carregados do Google Sheets.');
           return;
         }
@@ -885,6 +908,9 @@ function App() {
               const rows = sheetTransactions || [];
               setTransactions(rows);
               saveItems('fincontrol:transactions', rows);
+              const nextCategories = mergeTextLists(categories, rows.map((item) => item.category));
+              setCategories(nextCategories);
+              saveItems('fincontrol:categories', nextCategories);
               setSyncStatus(rows.length ? 'Dados carregados do Google Sheets.' : 'Planilha conectada, mas ainda sem lancamentos.');
             })
             .catch(() => setSyncStatus(error.message));
@@ -1053,6 +1079,19 @@ function App() {
     setIsTransactionModalOpen(true);
   }
 
+  function rememberTransactionOptions(transaction) {
+    const nextPeople = mergeTextLists(people, [transaction.person]).filter((person) => person.toLowerCase() !== 'eu');
+    const nextCards = mergeTextLists(cards, [transaction.card]);
+    const nextCategories = mergeTextLists(categories, [transaction.category]);
+
+    setPeople(nextPeople);
+    setCards(nextCards);
+    setCategories(nextCategories);
+    saveItems('fincontrol:people', nextPeople);
+    saveItems('fincontrol:cards', nextCards);
+    saveItems('fincontrol:categories', nextCategories);
+  }
+
   function saveTransaction(transaction) {
     if (editingTransaction) {
       const normalized = normalizeTransaction({
@@ -1069,6 +1108,7 @@ function App() {
 
       setTransactions(nextTransactions);
       saveItems('fincontrol:transactions', nextTransactions);
+      rememberTransactionOptions(normalized);
       setEditingTransaction(null);
       setIsTransactionModalOpen(false);
 
@@ -1088,16 +1128,7 @@ function App() {
     const nextTransactions = [...projectedInstallments, ...transactions];
     setTransactions(nextTransactions);
     saveItems('fincontrol:transactions', nextTransactions);
-
-    const nextPeople = [
-      ...new Set([...people, baseTransaction.person].filter((person) => person && person.toLowerCase() !== 'eu')),
-    ];
-    const nextCards = [...new Set([...cards, baseTransaction.card].filter(Boolean))];
-
-    setPeople(nextPeople);
-    setCards(nextCards);
-    localStorage.setItem('fincontrol:people', JSON.stringify(nextPeople));
-    localStorage.setItem('fincontrol:cards', JSON.stringify(nextCards));
+    rememberTransactionOptions(baseTransaction);
     setIsTransactionModalOpen(false);
     setSelectedMonth(monthKey(projectedInstallments[0]?.date || baseTransaction.date) || selectedMonth);
 
@@ -1276,7 +1307,7 @@ function App() {
   function exportBackup() {
     downloadTextFile(
       `fincontrol-backup-${today()}.json`,
-      JSON.stringify({ transactions, cardBills, reminders, goals, debts, people, cards }, null, 2),
+      JSON.stringify({ transactions, cardBills, reminders, goals, debts, people, cards, categories }, null, 2),
       'application/json',
     );
   }
@@ -1304,6 +1335,9 @@ function App() {
       const next = data.transactions.map(normalizeTransaction);
       setTransactions(next);
       saveItems('fincontrol:transactions', next);
+      const nextCategories = mergeTextLists(categories, next.map((item) => item.category));
+      setCategories(nextCategories);
+      saveItems('fincontrol:categories', nextCategories);
     }
     if (data.cardBills) {
       setCardBills(data.cardBills);
@@ -1320,6 +1354,11 @@ function App() {
     if (data.debts) {
       setDebts(data.debts);
       saveItems('fincontrol:debts', data.debts);
+    }
+    if (data.categories) {
+      const nextCategories = mergeTextLists(defaultCategories, categories, data.categories);
+      setCategories(nextCategories);
+      saveItems('fincontrol:categories', nextCategories);
     }
   }
 
@@ -1413,7 +1452,7 @@ function App() {
       {isTransactionModalOpen && (
         <TransactionModal
           cards={cards}
-          categories={defaultCategories}
+          categories={categories}
           initialTransaction={editingTransaction}
           people={people}
           onClose={closeTransactionModal}

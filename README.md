@@ -172,6 +172,7 @@ Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tam
 ## Cartoes, pessoas e parcelas
 
 - Receitas como `Salario` entram como credito, somam no saldo e nao usam campos de parcelas.
+- Categorias novas digitadas no cadastro ou na edicao, como `Animais` e `Eletronicos`, sao salvas nas sugestoes para proximos lancamentos.
 - Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
 - No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. O padrao e `Valor de cada parcela`, para o app nao dividir novamente valores como `29,49`.
 - Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.
