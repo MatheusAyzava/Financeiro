@@ -769,34 +769,8 @@ async function deleteTransactionFromSheet(config, transaction) {
 }
 
 async function updateTransactionInSheet(config, transaction) {
-  const scriptUrl = normalizeText(config.scriptUrl);
-  if (!scriptUrl) return;
-
-  const payload = JSON.stringify({
-    action: 'updateTransaction',
-    sheetRow: transaction.sheetRow,
-    transaction: [
-      transaction.date,
-      transaction.description,
-      transaction.category,
-      transaction.account,
-      transaction.amount,
-      transaction.person,
-      transaction.card,
-      transaction.status,
-      transaction.installments,
-      transaction.notes,
-    ],
-  });
-
-  await fetch(scriptUrl, {
-    method: 'POST',
-    mode: 'no-cors',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-    },
-    body: new URLSearchParams({ payload }),
-  });
+  await deleteTransactionFromSheet(config, transaction);
+  await appendTransactionsToSheet(config, [transaction]);
 }
 
 function currency(value) {
@@ -1116,7 +1090,7 @@ function App() {
         .then(() => {
           if (sheetsConfig.scriptUrl) {
             setSyncStatus('Lancamento atualizado no Google Sheets.');
-            refreshSheetSoon();
+            refreshSheetSoon(2500);
           }
         })
         .catch(() => setSyncStatus('Lancamento atualizado no app, mas nao foi atualizado na planilha.'));
