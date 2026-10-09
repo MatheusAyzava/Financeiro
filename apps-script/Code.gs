@@ -1,7 +1,8 @@
 const SHEET_NAME = 'Lancamentos';
-const FATURA_SHEET_NAME = 'Faturas';
-// Limite do Google Sheets e 50.000 caracteres por celula; o JSON e dividido em pedacos.
-const FATURA_CHUNK = 45000;
+const LOAN_SHEET_NAME = 'Emprestimos';
+const LOAN_HEADER = ['ID', 'Data', 'Descricao', 'Credor', 'Valor total', 'Parcelas', 'Valor parcela', 'Primeira parcela', 'Parcelas pagas', 'Falta pagar', 'Meses pagos', 'Observacao'];
+// Texto puro nas colunas de ID, data, mes e meses pagos, para o Sheets nao converter.
+const LOAN_FORMATS = ['@', '@', '@', '@', '#,##0.00', '0', '#,##0.00', '@', '0', '#,##0.00', '@', '@'];
 
 function respond(data, callback) {
   const output = JSON.stringify(data);
@@ -17,13 +18,14 @@ function respond(data, callback) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function getFaturaSheet() {
+function getLoanSheet() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = spreadsheet.getSheetByName(FATURA_SHEET_NAME);
+  let sheet = spreadsheet.getSheetByName(LOAN_SHEET_NAME);
 
   if (!sheet) {
-    sheet = spreadsheet.insertSheet(FATURA_SHEET_NAME);
-    sheet.getRange(1, 1, 1, 3).setValues([['Chave', 'Atualizado em', 'Dados (JSON)']]);
+    sheet = spreadsheet.insertSheet(LOAN_SHEET_NAME);
+    sheet.getRange(1, 1, 1, LOAN_HEADER.length).setValues([LOAN_HEADER]).setFontWeight('bold');
+    sheet.setFrozenRows(1);
   }
 
   return sheet;
@@ -48,46 +50,58 @@ function doGet(e) {
     return respond({ values }, callback);
   }
 
-  if (action === 'listFatura') {
-    const values = getFaturaSheet().getDataRange().getValues().slice(1);
-    const rows = values
-      .filter((row) => row[0])
-      .map((row) => [String(row[0]), row.slice(2).join('')]);
+  if (action === 'listEmprestimos') {
+    const values = getLoanSheet().getDataRange().getValues().map((row, rowIndex) =>
+      row.map((cell) => {
+        if (rowIndex > 0 && cell instanceof Date) {
+          return Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        }
 
-    return respond({ rows }, callback);
+        return cell;
+      })
+    );
+
+    return respond({ values }, callback);
   }
 
   return ContentService.createTextOutput('ignored');
 }
 
-function saveFatura(key, json) {
+function findLoanRow(sheet, id) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+
+  const ids = sheet.getRange(2, 1, lastRow - 1, 1).getDisplayValues().map((row) => row[0]);
+  const index = ids.indexOf(String(id));
+  return index >= 0 ? index + 2 : -1;
+}
+
+function saveLoan(row) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
 
   try {
-    const sheet = getFaturaSheet();
-    const lastRow = sheet.getLastRow();
-    const keys = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues().map((row) => String(row[0])) : [];
-    const index = keys.indexOf(key);
-    const row = index >= 0 ? index + 2 : lastRow + 1;
+    const sheet = getLoanSheet();
+    const values = LOAN_HEADER.map((_, index) => (row[index] === undefined || row[index] === null ? '' : row[index]));
+    const existing = findLoanRow(sheet, values[0]);
+    const target = existing > 0 ? existing : sheet.getLastRow() + 1;
+    const range = sheet.getRange(target, 1, 1, LOAN_HEADER.length);
 
-    if (!json) {
-      if (index >= 0) sheet.deleteRow(row);
-      return;
-    }
+    range.setNumberFormats([LOAN_FORMATS]);
+    range.setValues([values.map((value, index) => (LOAN_FORMATS[index] === '@' ? String(value) : value))]);
+  } finally {
+    lock.releaseLock();
+  }
+}
 
-    const chunks = [];
-    for (let start = 0; start < json.length; start += FATURA_CHUNK) {
-      chunks.push(json.slice(start, start + FATURA_CHUNK));
-    }
+function deleteLoan(id) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
 
-    if (index >= 0 && sheet.getLastColumn() > 2) {
-      sheet.getRange(row, 3, 1, sheet.getLastColumn() - 2).clearContent();
-    }
-
-    sheet.getRange(row, 1, 1, 2).setValues([[key, new Date()]]);
-    // Formato texto para o Sheets nao converter pedacos do JSON em numero ou formula.
-    sheet.getRange(row, 3, 1, chunks.length).setNumberFormat('@').setValues([chunks]);
+  try {
+    const sheet = getLoanSheet();
+    const row = findLoanRow(sheet, id);
+    if (row > 0) sheet.deleteRow(row);
   } finally {
     lock.releaseLock();
   }
@@ -98,9 +112,14 @@ function doPost(e) {
   const payloadText = e.parameter.payload || e.postData.contents || '{}';
   const payload = JSON.parse(payloadText);
 
-  if (payload.action === 'saveFatura') {
-    saveFatura(String(payload.key || ''), String(payload.json || ''));
+  if (payload.action === 'saveEmprestimo') {
+    saveLoan(payload.row || []);
     return ContentService.createTextOutput('saved');
+  }
+
+  if (payload.action === 'deleteEmprestimo') {
+    deleteLoan(String(payload.id || ''));
+    return ContentService.createTextOutput('deleted');
   }
 
   if (payload.action === 'appendTransactions') {

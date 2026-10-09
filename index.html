@@ -20,6 +20,7 @@
 }
 
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45;padding-inline:16px;padding-block:20px 56px}
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -54,6 +55,17 @@ button{font:inherit;color:inherit;cursor:pointer}
 .nav button:disabled{opacity:.35;cursor:default}
 .mtitle{font-family:var(--display);font-weight:700;font-size:22px;margin:0 6px;letter-spacing:-.01em}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--tile);color:var(--muted);width:max-content;max-width:100%}
+.tabs{display:flex;gap:4px;background:var(--surface);border-radius:999px;padding:4px;width:max-content;max-width:100%;box-shadow:var(--shadow)}
+.tabs button{border:0;background:transparent;border-radius:999px;padding:8px 18px;font-weight:700;font-size:14px;color:var(--muted)}
+.tabs button.on{background:var(--accent);color:var(--accenti)}
+.cardtabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}
+.ctab{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:2px;border:1px solid var(--line);background:var(--surface);border-radius:16px;padding:10px 16px;min-width:120px;text-align:left}
+.ctab b{font-size:14px}
+.ctab span{font-size:12px;color:var(--muted)}
+.ctab:hover{background:var(--sel)}
+.ctab.on{background:var(--accent);border-color:transparent;color:var(--accenti)}
+.ctab.on span{color:var(--accenti);opacity:.8}
+.t .dot{display:inline-block}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
 .btn:disabled{opacity:.5;cursor:default}
@@ -187,15 +199,19 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
   <header class="top">
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
-      <div><h1>Fatura do Cartão</h1><p>Gastos do cartão divididos por pessoa</p></div>
+      <div><h1 id="ttl">Fatura do Cartão</h1><p id="sttl">Gastos do cartão divididos por pessoa</p></div>
     </div>
-    <div class="actions">
+    <div class="actions" id="actLoans" hidden>
+      <button class="btn primary" data-act="loanform">+ Empréstimo</button>
+    </div>
+    <div class="actions" id="actFatura">
       <button class="btn" data-act="pessoas">Pessoas</button>
       <button class="btn" id="btnX" data-act="xlsx" hidden>Baixar tudo</button>
       <button class="btn primary" data-act="pick">Importar fatura</button>
       <input type="file" id="file" accept=".csv,text/csv,text/plain" hidden>
     </div>
   </header>
+  <nav class="tabs" aria-label="Seções"><button data-act="tab" data-t="fatura" id="tab-fatura">Fatura</button><button data-act="tab" data-t="emprestimos" id="tab-emprestimos">Empréstimos</button></nav>
   <main id="main" class="app" style="gap:16px"></main>
   <p class="foot-note" id="note"></p>
 </div>
@@ -230,7 +246,7 @@ var todayISO=function(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMon
 var nowIdx=function(){var d=new Date();return idx(d.getFullYear(),d.getMonth()+1)};
 var LOCAL_KEY="fatura-matheus-v2";
 
-var S={rows:[],extra:[],people:BASE.slice(),card:"all",sel:null,filter:"all",view:"chart",open:{},ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:null,busy:0};
+var S={tab:location.hash==="#emprestimos"?"emprestimos":"fatura",rows:[],extra:[],people:BASE.slice(),card:"all",sel:null,filter:"all",view:"chart",open:{},ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:null,busy:0};
 var isP=function(o){return S.people.indexOf(o)>-1};
 var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":"c"+((n%8)+1)};
 function groups(t){return S.people.map(function(p){return {n:p,c:cls(p),v:t.by[p]||0}});}
@@ -330,8 +346,11 @@ function firstMonth(r){
 function instValue(r){var v=Math.abs(r.amount);return /\[valor-total\]/.test(r.notes)&&r.parcelas>1?r2(v/r.parcelas):v;}
 function isRec(r){return /\[recorrente\]/.test(r.notes);}
 function setMarker(notes,marker,on){notes=notes.split(marker).join("").replace(/\s+/g," ").trim();return on?(notes+" "+marker).trim():notes;}
-function expenses(){return S.rows.filter(function(r){return r.amount<0&&r.name&&(S.card==="all"||r.card===S.card)&&firstMonth(r)!=null});}
-function cards(){var c={Nubank:1};S.rows.forEach(function(r){if(r.card)c[r.card]=1});return Object.keys(c).sort();}
+var CARDS=["Nubank","Itaú","C6","Banco do Brasil"];
+function sameCard(a,b){return normKey(a||"")===normKey(b||"");}
+function cards(){var c=CARDS.slice();S.rows.forEach(function(r){if(r.amount<0&&r.card&&!c.some(function(x){return sameCard(x,r.card)}))c.push(r.card)});return c;}
+function cardName(n){return cards().find(function(c){return sameCard(c,n)})||n;}
+function expenses(card){card=card||S.card;return S.rows.filter(function(r){return r.amount<0&&r.name&&(card==="all"||sameCard(r.card,card))&&firstMonth(r)!=null});}
 
 /* ---------- modelo ---------- */
 function realMonths(){var s={};expenses().forEach(function(r){if(r.parcelas<=1)s[firstMonth(r)]=1});return s;}
@@ -443,6 +462,7 @@ async function init(){
   S.canDl=!!window.XLSX; $("#btnX").hidden=!S.canDl;
   scriptUrl=getScriptUrl();
   S.mode=scriptUrl?"sheet":"local";
+  initLoans().then(function(){if(S.tab==="emprestimos")render();else note();});
   loadLocal();refreshPeople();
   if(!scriptUrl){syncState="local";note();afterLoad();return;}
   syncState="loading";note();
@@ -452,6 +472,10 @@ async function init(){
   refreshPeople();note();afterLoad();
 }
 function note(){
+  if(S.tab==="emprestimos"){
+    $("#note").textContent=L.busy?"Gravando na planilha Google…":{local:"Planilha Google não configurada: salvo só neste navegador.",loading:"Carregando da planilha Google…",sheet:"Tudo registrado na planilha Google (aba Emprestimos).",old:"Para gravar na planilha, cole o Apps Script novo (apps-script/Code.gs). Por enquanto, salvo neste navegador."}[L.state];
+    return;
+  }
   var t=S.busy?"Gravando na planilha Google…":{
     local:"Planilha Google não configurada: salvo só neste navegador.",
     loading:"Carregando da planilha Google…",
@@ -510,7 +534,7 @@ function lastByKey(){
 }
 function planImport(p,card){
   var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0;
-  S.rows.forEach(function(r){if(r.amount<0&&r.card===card){var s=rowSig(r);have[s]=(have[s]||0)+1;}});
+  S.rows.forEach(function(r){if(r.amount<0&&sameCard(r.card,card)){var s=rowSig(r);have[s]=(have[s]||0)+1;}});
   p.items.forEach(function(x){
     if(x.ignored)return;
     var F=x.cur?month-(x.cur-1):month,parc=x.total||1;
@@ -528,8 +552,15 @@ function ownerSeg(owner,gid){
   return '<span class="owners">'+b+'<button class="o more" data-act="newp" data-g="'+esc(gid)+'" title="Escrever o nome de outra pessoa">Outro…</button></span>';
 }
 function dateBR(s){var m=(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+"/"+m[2]:"";}
-function cardSelect(){
-  return '<select class="cardsel" id="cardsel" aria-label="Cartão"><option value="all"'+(S.card==="all"?' selected':'')+'>Todos os cartões</option>'+cards().map(function(c){return '<option'+(S.card===c?' selected':'')+'>'+esc(c)+'</option>'}).join("")+'</select>';
+function cardMonthTotal(card,i){
+  var keep=S.card;S.card=card;var t=0;entriesFor(i).forEach(function(e){t+=e.amount});S.card=keep;return r2(t);
+}
+function cardTabsHTML(){
+  var i=S.sel;
+  return '<div class="cardtabs" role="tablist" aria-label="Cartões">'+[["all","Todos"]].concat(cards().map(function(c){return [c,c]})).map(function(c){
+    var on=S.card===c[0]||(c[0]!=="all"&&S.card!=="all"&&sameCard(S.card,c[0]));
+    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+'</span></button>';
+  }).join("")+'</div>';
 }
 function heroHTML(rm){
   var i=S.sel,es=entriesFor(i,rm),t=totals(es),real=!!rm[i];
@@ -540,7 +571,7 @@ function heroHTML(rm){
     return '<div class="person '+g.c+'"><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês</div></div>';
   }).join("");
   if(t.none>0)people+='<div class="person none"><div class="n">Sem dono</div><div class="v num">'+BRL.format(t.none)+'</div><div class="s">defina abaixo de quem é</div></div>';
-  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills">'+cardSelect()+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div></div></div><div class="people">'+people+'</div></section>';
+  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div></div></div><div class="people">'+people+'</div></section>';
 }
 function chartHTML(rm){
   var all=range(),data=all.map(function(i){return {i:i,t:totals(entriesFor(i,rm)),real:!!rm[i]};});
@@ -604,14 +635,30 @@ function histHTML(rm){
 function startHTML(){
   return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
+function renderChrome(){
+  var lo=S.tab==="emprestimos";
+  $("#ttl").textContent=lo?"Empréstimos":"Fatura do Cartão";
+  $("#sttl").textContent=lo?"O que você pegou, as parcelas e quanto falta":"Gastos do cartão divididos por pessoa";
+  $("#actLoans").hidden=!lo;$("#actFatura").hidden=lo;
+  $("#tab-fatura").className=lo?"":"on";$("#tab-emprestimos").className=lo?"on":"";
+  document.title=lo?"Empréstimos":"Fatura do Cartão";
+}
 function render(){
+  renderChrome();note();
   var m=$("#main");
+  if(S.tab==="emprestimos"){
+    var lp=$("#lplot");if(lp)L.scroll=lp.scrollLeft;
+    m.innerHTML=L.state==="loading"&&!L.list.length?'<section class="card"><div class="empty">Carregando da planilha…</div></section>':loansHTML();
+    var np=$("#lplot");if(np){if(L.scroll==null){var c0=np.querySelector(".col.sel");if(c0)np.scrollLeft=c0.offsetLeft-np.clientWidth/2;}else np.scrollLeft=L.scroll;}
+    $("#modal").innerHTML=L.form?loanFormHTML():modalHTML();
+    return;
+  }
   var pl=$("#plot"),first=S.scroll==null;if(pl)S.scroll=pl.scrollLeft;
   if(!S.ready){m.innerHTML='<section class="card"><div class="empty">Carregando da planilha…</div></section>';$("#modal").innerHTML=modalHTML();return;}
   if(!S.rows.some(function(r){return r.amount<0})){m.innerHTML=startHTML();}
   else{
     var rm=realMonths();
-    m.innerHTML=heroHTML(rm)+chartHTML(rm)+listHTML(rm)+histHTML(rm);
+    m.innerHTML=cardTabsHTML()+heroHTML(rm)+chartHTML(rm)+listHTML(rm)+histHTML(rm);
     var p=$("#plot");
     if(p){if(first||S.scroll==null){var c=p.querySelector(".col.sel");if(c)p.scrollLeft=c.offsetLeft-p.clientWidth/2;S.scroll=p.scrollLeft;}else p.scrollLeft=S.scroll;}
   }
@@ -749,13 +796,147 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+
+/* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
+/* Uma linha por empréstimo que você pegou:
+   ID | Data | Descricao | Credor | Valor total | Parcelas | Valor parcela | Primeira parcela | Parcelas pagas | Falta pagar | Meses pagos | Observacao */
+var L={list:[],mode:"local",state:"local",sel:null,form:null,busy:0,chain:Promise.resolve(),scroll:null};
+var LOAN_KEY="emprestimos-matheus-v1";
+function normMonth(v){
+  if(v==null||v==="")return "";
+  var s=String(v).trim();
+  if(/^\d{4}-\d{2}$/.test(s))return s;
+  var d=normDate(v);return /^\d{4}-\d{2}/.test(d)?d.slice(0,7):"";
+}
+function loanFromRow(a){
+  var paid=String(a[10]||"").split(/[\s,;]+/).map(normMonth).filter(Boolean);
+  return {id:String(a[0]||"").trim(),date:normDate(a[1]),name:String(a[2]||"").trim(),lender:String(a[3]||"").trim(),total:r2(num(a[4])),n:Math.max(parseInt(a[5],10)||1,1),inst:r2(num(a[6])),first:normMonth(a[7]),paid:paid,notes:String(a[11]||"").trim()};
+}
+function loanPaidCount(l){var F=pm(l.first);return l.paid.filter(function(m){var i=pm(m);return i>=F&&i<F+l.n}).length;}
+function loanLeft(l){return r2(l.inst*(l.n-loanPaidCount(l)));}
+function loanToRow(l){return [l.id,l.date,l.name,l.lender,l.total,l.n,l.inst,l.first,loanPaidCount(l),loanLeft(l),l.paid.slice().sort().join(" "),l.notes];}
+function loanDone(l){return loanPaidCount(l)>=l.n;}
+function isPaid(l,i){return l.paid.indexOf(mid(i))>-1;}
+function saveLoansLocal(){try{localStorage.setItem(LOAN_KEY,JSON.stringify(L.list))}catch(e){}}
+function loadLoansLocal(){try{L.list=JSON.parse(localStorage.getItem(LOAN_KEY)||"[]")||[]}catch(e){L.list=[]}}
+async function fetchLoans(){
+  var d=await jsonp(scriptUrl,{action:"listEmprestimos"},10000);
+  if(!d||!Array.isArray(d.values))throw new Error("formato");
+  return d.values.slice(1).filter(function(a){return a&&a[0]}).map(loanFromRow).filter(function(l){return l.first});
+}
+async function initLoans(){
+  loadLoansLocal();
+  if(!scriptUrl){L.mode="local";L.state="local";return;}
+  L.state="loading";
+  try{
+    var rows=await fetchLoans();L.mode="sheet";L.state="sheet";
+    if(!rows.length&&L.list.length){var pend=L.list.slice();pend.forEach(function(l){queueLoan("save",l)});}
+    else{L.list=rows;saveLoansLocal();}
+  }catch(e){L.mode="local";L.state="old";}
+}
+async function reloadLoans(){
+  if(L.mode!=="sheet"||L.busy)return;
+  try{var rows=await fetchLoans();if(L.busy)return;L.list=rows;saveLoansLocal();if(S.tab==="emprestimos")render();}catch(e){}
+}
+function queueLoan(kind,l){
+  saveLoansLocal();
+  if(L.mode!=="sheet")return;
+  L.busy++;note();
+  var payload=kind==="save"?{action:"saveEmprestimo",row:loanToRow(l)}:{action:"deleteEmprestimo",id:l.id};
+  L.chain=L.chain.then(function(){return postSheet(payload)}).catch(function(){toast("Não foi possível gravar na planilha. Confira a conexão e tente de novo.");}).then(function(){L.busy--;note();if(!L.busy)reloadLoans();});
+}
+function saveLoan(l){
+  var i=L.list.findIndex(function(x){return x.id===l.id});
+  if(i>-1)L.list[i]=l;else L.list.push(l);
+  queueLoan("save",l);
+}
+function deleteLoan(id){
+  var l=L.list.find(function(x){return x.id===id});if(!l)return;
+  L.list=L.list.filter(function(x){return x.id!==id});
+  queueLoan("delete",l);toast("Empréstimo excluído.");
+}
+function togglePaid(id,i){
+  var l=L.list.find(function(x){return x.id===id});if(!l)return;
+  var m=mid(i),c=Object.assign({},l,{paid:l.paid.slice()});
+  var k=c.paid.indexOf(m);if(k>-1)c.paid.splice(k,1);else c.paid.push(m);
+  saveLoan(c);
+}
+function loanRange(){
+  var now=nowIdx(),start=now,end=now+3;
+  L.list.forEach(function(l){var F=pm(l.first);start=Math.min(start,F);end=Math.max(end,F+l.n-1);});
+  start=Math.max(start,now-24);end=Math.min(end,start+72);
+  var a=[];for(var i=start;i<=end;i++)a.push(i);return a;
+}
+function loanCls(l){var n=L.list.indexOf(l);return "c"+((n%8)+1);}
+function monthLoans(i){return L.list.filter(function(l){var F=pm(l.first);return i>=F&&i<F+l.n});}
+
+function loansHTML(){
+  if(!L.list.length)return '<section class="card start"><span class="pill">Nenhum empréstimo ainda</span><h2>Controle os empréstimos que você pegou</h2><p>Cadastre o valor da parcela, quantas são e o mês da primeira. O app mostra quanto falta pagar, as parcelas de cada mês e você marca cada uma como paga. Tudo fica registrado na aba “Emprestimos” da planilha Google.</p><button class="btn primary" data-act="loanform">+ Empréstimo</button></section>';
+  var all=loanRange();
+  if(L.sel==null||all.indexOf(L.sel)<0)L.sel=Math.min(Math.max(nowIdx(),all[0]),all[all.length-1]);
+  var i=L.sel,ms=monthLoans(i),due=0,paidM=0;
+  ms.forEach(function(l){due+=l.inst;if(isPaid(l,i))paidM+=l.inst;});
+  var left=0,active=0;L.list.forEach(function(l){left+=loanLeft(l);if(!loanDone(l))active++;});
+  var hero='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="lprev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="lnext" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><span class="pill">Parcelas do mês</span><div class="big num">'+BRL.format(r2(due))+'</div><div class="sub">'+ms.length+' parcela'+(ms.length===1?'':'s')+' · '+BRL.format(r2(paidM))+' já pago</div></div></div><div class="people">'
+    +'<div class="person c2"><div class="n"><span class="dot"></span>Falta pagar</div><div class="v num">'+BRL.format(r2(left))+'</div><div class="s">somando todos os empréstimos</div></div>'
+    +'<div class="person c3"><div class="n"><span class="dot"></span>Pago neste mês</div><div class="v num">'+BRL.format(r2(paidM))+'</div><div class="bar"><i style="width:'+(due?Math.round(paidM/due*100):0)+'%"></i></div><div class="s num">de '+BRL.format(r2(due))+'</div></div>'
+    +'<div class="person c1"><div class="n"><span class="dot"></span>Ativos</div><div class="v num">'+active+'</div><div class="s">'+(L.list.length-active)+' quitado'+(L.list.length-active===1?'':'s')+'</div></div>'
+    +'</div></section>';
+  var data=all.map(function(m){var segs=monthLoans(m).map(function(l){return {l:l,v:l.inst,paid:isPaid(l,m)}});return {i:m,segs:segs,t:segs.reduce(function(a,s){return a+s.v},0)};});
+  var mx=Math.max.apply(null,data.map(function(d){return d.t}).concat([1]));
+  var chart='<section class="card"><div class="ch"><h2>Parcelas mês a mês</h2></div><div class="plot" id="lplot">'+data.map(function(d){
+    var segs=d.segs.map(function(s){return '<i class="'+loanCls(s.l)+(s.paid?'':' pr')+'" style="height:'+Math.max(2,s.v/mx*200)+'px" title="'+esc(s.l.name)+': '+BRL.format(s.v)+(s.paid?' (paga)':' (em aberto)')+'"></i>'}).join("");
+    return '<button class="col'+(d.i===i?' sel':'')+'" data-act="lsel" data-i="'+d.i+'" aria-label="'+mname(d.i)+', '+BRL.format(d.t)+'"><span class="tot num">'+(d.t?N0.format(d.t):'–')+'</span><div class="stack">'+segs+'</div><span class="lbl">'+mshort(d.i)+'</span></button>';
+  }).join("")+'</div><div class="legend">'+L.list.map(function(l){return '<span class="'+loanCls(l)+'"><i class="dot"></i>'+esc(l.name)+'</span>'}).join("")+'<span><i class="hatch"></i>Listrado = em aberto</span></div></section>';
+  var sorted=L.list.slice().sort(function(a,b){return (loanDone(a)-loanDone(b))||pm(a.first)-pm(b.first)});
+  var rows=sorted.map(function(l){
+    var F=pm(l.first),k=i-F+1,pc=loanPaidCount(l),inMonth=k>=1&&k<=l.n,paid=inMonth&&isPaid(l,i);
+    var next=null;for(var j=F;j<F+l.n;j++){if(!isPaid(l,j)){next=j;break;}}
+    var meta='<span class="tag">'+pc+' de '+l.n+' pagas</span>'+(l.lender?'<span class="tag">'+esc(l.lender)+'</span>':'')+(loanDone(l)?'<span class="tag on">quitado</span>':(next!=null?'<span class="tag">próxima: '+mshort(next)+'</span>':''))+'<span class="tag">até '+mshort(F+l.n-1)+'</span>';
+    var pay=inMonth?'<button class="o '+loanCls(l)+(paid?' on':'')+'" data-act="lpay" data-id="'+esc(l.id)+'" aria-pressed="'+paid+'">'+(paid?'Paga ✓':'Pagar '+k+'/'+l.n)+'</button>':'<span class="tag">sem parcela em '+mshort(i)+'</span>';
+    var open=S.open["L"+l.id];
+    var det=open?'<div class="det"><div><span class="dn">Valor pego</span><span class="da num">'+(l.total?BRL.format(l.total):'–')+'</span></div><div><span class="dn">Total das parcelas</span><span class="da num">'+BRL.format(r2(l.inst*l.n))+(l.total&&l.inst*l.n>l.total?' · juros '+BRL.format(r2(l.inst*l.n-l.total)):'')+'</span></div><div><span class="dn">Falta pagar</span><span class="da num">'+BRL.format(loanLeft(l))+'</span></div>'+(l.date?'<div><span class="dn">Data</span><span class="da">'+esc(l.date.split("-").reverse().join("/"))+'</span></div>':'')+(l.notes?'<div><span class="dn">'+esc(l.notes)+'</span></div>':'')+'<div><span class="dn"></span><span class="da"><button data-act="ledit" data-id="'+esc(l.id)+'">editar</button><button data-act="ldel" data-id="'+esc(l.id)+'">excluir</button></span></div></div>':'';
+    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><span class="dot '+loanCls(l)+'"></span><button data-act="open" data-g="L'+esc(l.id)+'" aria-expanded="'+!!open+'">'+esc(l.name)+'</button></div><div class="m">'+meta+'</div><div class="bar '+loanCls(l)+'" style="max-width:260px"><i style="width:'+Math.round(pc/l.n*100)+'%"></i></div></div><div class="amt num">'+BRL.format(l.inst)+'<div class="sub">por mês</div></div><span class="owners">'+pay+'</span></div>'+det+'</div>';
+  }).join("");
+  var list='<section class="card"><div class="lh"><h2>Empréstimos</h2><button class="btn sm" data-act="loanform">+ Empréstimo</button></div><div>'+rows+'</div></section>';
+  return hero+chart+list;
+}
+function loanFormHTML(){
+  var l=L.form.loan||{},edit=!!L.form.loan;
+  var first=l.first||mid(L.sel!=null?L.sel:nowIdx());
+  var fy=+first.slice(0,4),fm=+first.slice(5,7),ys="";for(var a=fy-5;a<=fy+3;a++)ys+='<option value="'+a+'"'+(a===fy?' selected':'')+'>'+a+'</option>';
+  var mos=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===fm?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
+  var fmt=function(v){return v?String(v).replace(".",","):""};
+  return '<div class="ov"><form class="dlg" id="loanf" role="dialog" aria-modal="true" aria-label="Empréstimo"><h3>'+(edit?'Editar empréstimo':'Novo empréstimo')+'</h3><label>Descrição<input id="l-name" required value="'+esc(l.name||"")+'" placeholder="Ex.: Empréstimo Nubank, Consignado"></label><div class="two"><label>De quem peguei<input id="l-lender" value="'+esc(l.lender||"")+'" placeholder="Banco ou pessoa"></label><label>Data<input id="l-date" type="date" value="'+esc(l.date||todayISO())+'"></label></div><div class="two"><label>Valor pego (R$)<input id="l-total" inputmode="decimal" value="'+fmt(l.total)+'" placeholder="Opcional"></label><label>Valor da parcela (R$)<input id="l-inst" required inputmode="decimal" value="'+fmt(l.inst)+'" placeholder="0,00"></label></div><div class="two"><label>Número de parcelas<input id="l-n" required inputmode="numeric" value="'+(l.n||"")+'" placeholder="12"></label><label>Já paguei (parcelas)<input id="l-paid" inputmode="numeric" value="'+(edit?loanPaidCount(l):"")+'" placeholder="0"></label></div><div class="two"><label>Primeira parcela<select id="l-fm">'+mos+'</select></label><label>Ano<select id="l-fy">'+ys+'</select></label></div><label>Observação<input id="l-notes" value="'+esc(l.notes||"")+'" placeholder="Opcional"></label><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
+}
+function submitLoan(){
+  var name=$("#l-name").value.trim(),inst=parseAmount($("#l-inst").value),n=parseInt($("#l-n").value,10);
+  var total=$("#l-total").value.trim()?parseAmount($("#l-total").value):0,paidN=parseInt($("#l-paid").value,10)||0;
+  if(!name||isNaN(inst)||inst<=0||!(n>=1)){toast("Preencha descrição, valor da parcela e número de parcelas.");return;}
+  if(isNaN(total)||total<0)total=0;
+  paidN=Math.max(0,Math.min(paidN,n));
+  var first=$("#l-fy").value+"-"+pad($("#l-fm").value),F=pm(first),old=L.form.loan;
+  var paid;
+  if(old&&old.first===first&&loanPaidCount(old)===paidN)paid=old.paid.filter(function(m){var i=pm(m);return i>=F&&i<F+n});
+  else{paid=[];for(var k=0;k<paidN;k++)paid.push(mid(F+k));}
+  var l={id:old?old.id:"E"+Date.now().toString(36),date:$("#l-date").value||todayISO(),name:name,lender:$("#l-lender").value.trim(),total:r2(total),n:n,inst:r2(inst),first:first,paid:paid,notes:$("#l-notes").value.trim()};
+  saveLoan(l);L.form=null;L.sel=null;toast(old?"Empréstimo atualizado.":"Empréstimo gravado.");render();
+}
 
 /* ---------- eventos ---------- */
 document.addEventListener("click",function(ev){
   var el=ev.target.closest("[data-act]");
   if(!el){ if(ev.target.classList&&ev.target.classList.contains("ov")){closeAll();render();} return; }
   var a=el.getAttribute("data-act"),d=el.dataset;
+  if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="emprestimos"?"#emprestimos":location.pathname)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
+  if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="loanform"){L.form={loan:null};render();var ln=$("#l-name");if(ln)ln.focus();return;}
+  if(a==="ledit"){L.form={loan:L.list.find(function(x){return x.id===d.id})||null};render();return;}
+  if(a==="ldel"){if(el.dataset.sure){deleteLoan(d.id);render();return;}el.dataset.sure="1";el.textContent="confirmar exclusão";return;}
+  if(a==="lpay"){togglePaid(d.id,L.sel);render();return;}
+  if(a==="lprev"||a==="lnext"){var la=loanRange(),ln2=L.sel+(a==="lnext"?1:-1);if(ln2>=la[0]&&ln2<=la[la.length-1]){L.sel=ln2;L.scroll=null;render();}return;}
+  if(a==="lsel"){L.sel=+d.i;render();return;}
   if(a==="pick"){$("#file").click();return;}
   if(a==="xlsx"){exportXlsx();return;}
   if(a==="pxlsx"){exportPerson(d.p);return;}
@@ -783,7 +964,6 @@ document.addEventListener("click",function(ev){
 document.addEventListener("change",function(ev){
   var t=ev.target;
   if(t.id==="file"){handleFile(t.files[0]);t.value="";return;}
-  if(t.id==="cardsel"){S.card=t.value;S.filter="all";S.scroll=null;saveLocal();var all=range();if(all.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),all[0]),all[all.length-1]);render();return;}
   if(S.pending&&(t.id==="imp-m"||t.id==="imp-y"||t.id==="imp-card")){
     S.pending.month=$("#imp-y").value+"-"+pad($("#imp-m").value);
     S.pending.card=($("#imp-card").value||"").trim()||"Nubank";
@@ -793,11 +973,12 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
-  if(id==="addf"){ev.preventDefault();addManual();}
+  if(id==="loanf"){ev.preventDefault();submitLoan();}
+  else if(id==="addf"){ev.preventDefault();addManual();}
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
