@@ -252,7 +252,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
       <button class="btn" data-act="pessoas">Pessoas</button>
       <button class="btn" id="btnX" data-act="xlsx" hidden>Baixar tudo</button>
       <button class="btn primary" data-act="pick">Importar fatura</button>
-      <input type="file" id="file" accept=".csv,.txt,.ofx,.qfx,.xls,.xlsx,.pdf,.zip,text/csv,text/plain,application/pdf,application/zip" hidden>
+      <input type="file" id="file" accept=".csv,.txt,.ofx,.qfx,.xls,.xlsx,.pdf,.zip,.png,.jpg,.jpeg,.webp,.heic,text/csv,text/plain,application/pdf,application/zip,image/*" multiple hidden>
     </div>
   </header>
   <nav class="tabs" aria-label="Seções"><button data-act="tab" data-t="fatura" id="tab-fatura">Fatura</button><button data-act="tab" data-t="casa" id="tab-casa">Casa</button><button data-act="tab" data-t="recebidos" id="tab-recebidos">Recebidos</button><button data-act="tab" data-t="resumo" id="tab-resumo">Gastos x Recebidos</button><button data-act="tab" data-t="emprestimos" id="tab-emprestimos">Empréstimos</button></nav>
@@ -261,7 +261,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
 </div>
 <div id="modal"></div>
 <div id="toast" role="status"></div>
-<div id="drop" hidden>Solte a fatura aqui (CSV, OFX, Excel, PDF ou ZIP)</div>
+<div id="drop" hidden>Solte a fatura aqui (CSV, OFX, Excel, PDF, imagem ou ZIP)</div>
 
 <script type="module">window.FATURA_SCRIPT_URL=import.meta.env.VITE_GOOGLE_SCRIPT_URL||"";</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -407,12 +407,44 @@ function decodeText(buf){
   try{return new TextDecoder("utf-8",{fatal:true}).decode(buf);}catch(e){return new TextDecoder("windows-1252").decode(buf);}
 }
 function extOf(n){var m=String(n).toLowerCase().match(/\.([a-z0-9]+)$/);return m?m[1]:"";}
+/* Imagem (print ou foto da fatura): OCR em português com Tesseract.js, carregado só quando precisa.
+   O texto é lido no navegador; a imagem não sai do aparelho. */
+var IMG_EXT=["png","jpg","jpeg","webp","bmp","gif"];
+var ocrReady=null,ocrWorker=null;
+function loadOcr(){
+  if(ocrWorker)return Promise.resolve(ocrWorker);
+  if(!ocrReady)ocrReady=new Promise(function(res,rej){
+    var go=function(){
+      window.Tesseract.createWorker("por",1,{logger:function(m){if(m.status==="recognizing text")toast("Lendo a imagem… "+Math.round((m.progress||0)*100)+"%");else if(/load|initializ/.test(m.status||""))toast("Preparando o leitor de imagem…");}})
+        .then(function(w){ocrWorker=w;res(w);},function(){ocrReady=null;rej({msg:"Não consegui preparar o leitor de imagem. Confira a conexão."});});
+    };
+    if(window.Tesseract)return go();
+    var s=document.createElement("script");s.src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+    s.onload=go;s.onerror=function(){ocrReady=null;rej({msg:"Não consegui carregar o leitor de imagem. Confira a conexão."});};
+    document.head.appendChild(s);
+  });
+  return ocrReady;
+}
+async function imageLines(name,buf){
+  var w=await loadOcr(),ext=extOf(name);
+  var blob=new Blob([buf],{type:"image/"+(ext==="jpg"?"jpeg":ext)});
+  var r=await w.recognize(blob);
+  /* Corrige confusões comuns do OCR em valores: "1O,5O" -> "10,50", "R$1 2,30" etc. */
+  return String(r.data.text||"").split(/\r?\n/).map(function(l){
+    return l.replace(/(\d)[oO](?=[\d,.])/g,"$10").replace(/,[oO](\d)/g,",0$1").replace(/(\d),\s(\d{2})\b/g,"$1,$2").replace(/\s+/g," ").trim();
+  }).filter(Boolean);
+}
+function dueFromLines(lines,it){
+  lines.some(function(l){var m=l.match(/vencimento:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);if(m)it.due=m[3]+"-"+pad(m[2]);return !!m;});
+  return it;
+}
 async function itemsFromBuffer(name,buf,password){
   var ext=extOf(name);
+  if(ext==="heic"||ext==="heif")throw {msg:"Foto HEIC do iPhone não abre no navegador. Tire um print da tela ou exporte como JPG."};
+  if(IMG_EXT.indexOf(ext)>-1){var il=await imageLines(name,buf);return dueFromLines(il,buildItems(rowsFromLines(il)));}
   if(ext==="pdf"){
-    var lines=await pdfLines(buf,password),it=buildItems(rowsFromLines(lines));
-    lines.some(function(l){var m=l.match(/vencimento:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);if(m)it.due=m[3]+"-"+pad(m[2]);return !!m;});
-    return it;
+    var lines=await pdfLines(buf,password);
+    return dueFromLines(lines,buildItems(rowsFromLines(lines)));
   }
   if(ext==="xls"||ext==="xlsx"||ext==="xlsm"){
     if(!window.XLSX)throw {msg:"Não consegui carregar o leitor de Excel. Recarregue a página."};
@@ -424,7 +456,7 @@ async function itemsFromBuffer(name,buf,password){
   if(ext==="ofx"||ext==="qfx"||/OFXHEADER|<OFX>/i.test(text.slice(0,3000)))return buildItems(parseOFX(text));
   return buildItems(parseCSV(text));
 }
-var SUPPORTED=/\.(csv|txt|ofx|qfx|xls|xlsx|xlsm|pdf)$/i;
+var SUPPORTED=/\.(csv|txt|ofx|qfx|xls|xlsx|xlsm|pdf|png|jpe?g|webp|bmp|gif)$/i;
 async function unzipAll(file,password){
   if(!window.zip)throw {msg:"Não consegui carregar o leitor de ZIP. Recarregue a página."};
   var reader=new zip.ZipReader(new zip.BlobReader(file));
@@ -831,7 +863,7 @@ function histHTML(rm){
   return '<section class="card"><div class="ch"><h2>Histórico de faturas</h2></div><p class="hnote">Cada compra fica registrada como uma linha na planilha Google. Importar de novo a mesma fatura não duplica nada.</p><div class="hist">'+rows+'</div></section>';
 }
 function startHTML(){
-  return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>Exporte a fatura do banco (CSV, OFX, Excel, PDF ou ZIP, com ou sem senha) e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo da fatura</button><div class="steps"><div class="step"><b>1 · Importe</b>CSV, OFX, Excel, PDF ou ZIP da fatura.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
+  return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>Exporte a fatura do banco (CSV, OFX, Excel, PDF, print/foto ou ZIP, com ou sem senha) e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo da fatura</button><div class="steps"><div class="step"><b>1 · Importe</b>CSV, OFX, Excel, PDF, print ou ZIP da fatura.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
 var TAB_INFO={fatura:["Fatura do Cartão","Gastos do cartão divididos por pessoa"],casa:["Casa","Aluguel e contas que não são do cartão"],recebidos:["Recebidos","Quanto entrou, de onde e quando"],resumo:["Gastos x Recebidos","Onde mais gastamos e quanto sobra"],emprestimos:["Empréstimos","O que você pegou, as parcelas e quanto falta"]};
 function renderChrome(){
@@ -890,7 +922,7 @@ function modalHTML(){
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
   if(S.askPass){
-    return '<div class="ov"><form class="dlg" id="pwf" role="dialog" aria-modal="true" aria-label="Senha do arquivo"><h3>Arquivo protegido por senha</h3><div class="sub">'+esc(S.askPass.file.name)+'</div><label>Senha<input id="pw" type="password" autocomplete="off" required placeholder="Geralmente os números do CPF"></label>'+(S.askPass.wrong?'<div class="warnbox">Senha incorreta. Tente de novo.</div>':"")+'<div class="sub">A senha é usada só para abrir o arquivo neste navegador; não é salva nem enviada.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Abrir</button></div></form></div>';
+    return '<div class="ov"><form class="dlg" id="pwf" role="dialog" aria-modal="true" aria-label="Senha do arquivo"><h3>Arquivo protegido por senha</h3><div class="sub">'+esc(S.askPass.name)+'</div><label>Senha<input id="pw" type="password" autocomplete="off" required placeholder="Geralmente os números do CPF"></label>'+(S.askPass.wrong?'<div class="warnbox">Senha incorreta. Tente de novo.</div>':"")+'<div class="sub">A senha é usada só para abrir o arquivo neste navegador; não é salva nem enviada.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Abrir</button></div></form></div>';
   }
   if(S.newp){
     return '<div class="ov"><form class="dlg" id="newpf" role="dialog" aria-modal="true" aria-label="Outra pessoa"><h3>De quem é essa compra?</h3><label>Nome da pessoa<input id="np-name" required maxlength="24" placeholder="Ex.: Alessandra, Mãe"></label><div class="sub">O nome vai para a coluna “Quem usou” da planilha.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
@@ -906,12 +938,20 @@ function modalHTML(){
 }
 
 /* ---------- importar / lançar ---------- */
+/* Aceita um arquivo ou vários (ex.: várias fotos da mesma fatura); tudo vira uma importação só. */
 async function handleFile(file,password){
-  if(!file)return;
+  var files=file&&file.length!=null&&!file.name?Array.prototype.slice.call(file):(file?[file]:[]);
+  if(!files.length)return;
+  file=files[0];
   if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return;}
   toast("Lendo o arquivo…");
   try{
-    var parts=extOf(file.name)==="zip"?await unzipAll(file,password):[{name:file.name,buf:new Uint8Array(await file.arrayBuffer())}];
+    var parts=[];
+    for(var fi=0;fi<files.length;fi++){
+      var f=files[fi];
+      parts=parts.concat(extOf(f.name)==="zip"?await unzipAll(f,password):[{name:f.name,buf:new Uint8Array(await f.arrayBuffer())}]);
+    }
+    if(files.length>1)file={name:files.length+" arquivos"};
     var items=[],due=null;
     for(var n=0;n<parts.length;n++){var got=await itemsFromBuffer(parts[n].name,parts[n].buf,password);if(got.due)due=got.due;items=items.concat(got);}
     if(!items.length)throw {msg:"Não encontrei compras nesse arquivo. Confira se é a fatura do cartão."};
@@ -921,8 +961,8 @@ async function handleFile(file,password){
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(S.pending.month))S.pending.month=mid(nowIdx());
     toast("");render();
   }catch(e){
-    if(e&&e.code==="password"){toast("");S.askPass={file:file,wrong:!!e.wrong};render();var pi=$("#pw");if(pi)pi.focus();return;}
-    toast(e&&e.msg||"Não consegui ler esse arquivo. Use CSV, OFX, Excel, PDF ou ZIP da fatura.");
+    if(e&&e.code==="password"){toast("");S.askPass={file:files.length>1?files:files[0],name:file.name,wrong:!!e.wrong};render();var pi=$("#pw");if(pi)pi.focus();return;}
+    toast(e&&e.msg||"Não consegui ler esse arquivo. Use CSV, OFX, Excel, PDF, imagem ou ZIP da fatura.");
   }
 }
 function confirmImport(){
@@ -1432,7 +1472,7 @@ document.addEventListener("click",function(ev){
 });
 document.addEventListener("change",function(ev){
   var t=ev.target;
-  if(t.id==="file"){handleFile(t.files[0]);t.value="";return;}
+  if(t.id==="file"){handleFile(t.files);t.value="";return;}
   if(S.pending&&(t.id==="imp-m"||t.id==="imp-y"||t.id==="imp-card")){
     S.pending.month=$("#imp-y").value+"-"+pad($("#imp-m").value);
     S.pending.card=($("#imp-card").value||"").trim()||"Nubank";
@@ -1457,7 +1497,7 @@ var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
 window.addEventListener("dragover",function(e){e.preventDefault();});
-window.addEventListener("drop",function(e){e.preventDefault();dc=0;$("#drop").hidden=true;var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f)handleFile(f);});
+window.addEventListener("drop",function(e){e.preventDefault();dc=0;$("#drop").hidden=true;var fl=e.dataTransfer&&e.dataTransfer.files;if(fl&&fl.length)handleFile(fl);});
 
 document.addEventListener("DOMContentLoaded",init);
 })();
