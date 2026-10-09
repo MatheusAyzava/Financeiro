@@ -105,6 +105,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .empty.sm{padding:12px 0;text-align:left;font-size:13px;border-top:1px solid var(--line)}
 .tag.late{background:rgba(240,107,170,.18);color:var(--exp)}
 .paidbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
@@ -385,7 +386,7 @@ function buildItems(rows){
   items.forEach(function(i){
     if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso|devolu/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
     else if(i.amount===0){i.ignored=true;i.reason="Valor zerado";}
-    else if(/pagamento recebido|pagamento efetuado|pagto|valor pendente|saldo anterior|saldo da fatura|total da fatura/i.test(i.name)){i.ignored=true;i.reason="Saldo ou pagamento da fatura";}
+    else if(/pagamento recebido|pagamento efetuado|pagto|saldo da fatura|total da fatura/i.test(i.name)){i.ignored=true;i.reason="Saldo ou pagamento da fatura";}
   });
   items.forEach(function(i){
     if(i.ignored||i.cur)return;
@@ -635,7 +636,7 @@ function jsonp(url,params,ms){
     var done=function(){clearTimeout(t);delete window[cb];s.remove();};
     window[cb]=function(data){done();resolve(data)};
     s.onerror=function(){done();reject(new Error("falha"))};
-    t=setTimeout(function(){done();reject(new Error("tempo"))},ms||15000);
+    t=setTimeout(function(){done();reject(new Error("tempo"))},ms||25000);
     s.src=u.toString();document.body.appendChild(s);
   });
 }
@@ -656,15 +657,40 @@ async function reload(){
 /* Troca linhas: apaga as antigas e grava as novas. Usa só as ações que o Apps Script já tem
    (deleteTransaction e appendTransactions). As linhas a apagar são localizadas de novo na
    planilha pelo conteúdo, para não apagar a linha errada se a planilha mudou. */
+var retryTimer=null;
+async function fetchRowsRetry(tries){
+  for(var n=0;n<tries;n++){
+    try{return await fetchRows();}catch(e){if(n===tries-1)throw e;await new Promise(function(r){setTimeout(r,3000*(n+1))});}
+  }
+}
+function goOnline(rows){
+  S.mode="sheet";syncState="sheet";clearTimeout(retryTimer);
+  if(rows&&!S.busy){S.rows=rows;saveLocal();refreshPeople();}
+  note();
+}
+/* Sem conexão: tenta de novo sozinho a cada 20 s, sem precisar recarregar a página. */
+function scheduleRetry(){
+  clearTimeout(retryTimer);
+  retryTimer=setTimeout(async function(){
+    if(S.mode!=="offline")return;
+    try{var rows=await fetchRows();goOnline(rows);afterLoad();toast("Planilha conectada de novo.");}catch(e){scheduleRetry();}
+  },20000);
+}
+async function ensureOnline(){
+  if(S.mode==="sheet")return;
+  syncState="loading";note();
+  try{await fetchRowsRetry(3);goOnline(null);}
+  catch(e){S.mode="offline";syncState="offline";note();scheduleRetry();throw e;}
+}
 function commit(remove,add){
-  if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return false;}
   var rm={};remove.forEach(function(r){rm[r.id]=1});
   var oldRows=remove.map(function(r){return Object.assign({},r)}),newRows=add.map(toArray);
   S.rows=S.rows.filter(function(r){return !rm[r.id]}).concat(add.map(function(r){r.id=newId();r.sheetRow=null;return r;}));
   refreshPeople();saveLocal();
-  if(S.mode!=="sheet")return true;
+  if(S.mode==="local")return true;
   S.busy++;note();
   chain=chain.then(async function(){
+    await ensureOnline();
     if(oldRows.length){
       var fresh=await fetchRows(),used={},targets=[];
       oldRows.forEach(function(r){var s=sig(r),f=fresh.find(function(x){return !used[x.sheetRow]&&sig(x)===s});if(f){used[f.sheetRow]=1;targets.push(f);}});
@@ -672,7 +698,7 @@ function commit(remove,add){
       for(var n=0;n<targets.length;n++)await postSheet({action:"deleteTransaction",sheetRow:targets[n].sheetRow,transaction:toArray(targets[n])});
     }
     if(newRows.length)await postSheet({action:"appendTransactions",transactions:newRows});
-  }).catch(function(){toast("Não foi possível gravar na planilha. Confira a conexão e tente de novo.");}).then(function(){
+  }).catch(function(){toast("Não consegui gravar na planilha agora. Essa alteração não foi salva; tente de novo em instantes.");}).then(function(){
     S.busy--;note();if(!S.busy)reload();
   });
   return true;
@@ -695,8 +721,8 @@ async function init(){
   if(!scriptUrl){syncState="local";note();afterLoad();return;}
   syncState="loading";note();
   if(S.rows.length)afterLoad();else render();
-  try{S.rows=await fetchRows();syncState="sheet";saveLocal();}
-  catch(e){S.mode="offline";syncState="offline";}
+  try{S.rows=await fetchRowsRetry(3);syncState="sheet";saveLocal();}
+  catch(e){S.mode="offline";syncState="offline";scheduleRetry();}
   refreshPeople();note();afterLoad();
 }
 function note(){
@@ -708,7 +734,7 @@ function note(){
     local:"Planilha Google não configurada: salvo só neste navegador.",
     loading:"Carregando da planilha Google…",
     sheet:"Tudo registrado na planilha Google (aba Lancamentos).",
-    offline:"Não consegui abrir a planilha agora. Mostrando a última cópia deste navegador; recarregue para tentar de novo."
+    offline:"Sem conexão com a planilha agora; tentando de novo sozinho. Mostrando a última cópia deste navegador."
   }[syncState];
   $("#note").textContent=t;
 }
@@ -768,8 +794,8 @@ function planImport(p,card){
     var F=x.cur?month-(x.cur-1):month,parc=x.total||1;
     var s=x.key+"|"+x.amount.toFixed(2)+"|"+parc+"|"+F+(parc>1?"":"|"+x.date);
     if(have[s]){have[s]--;dup++;return;}
-    var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r);
-    add.push({date:x.date||mid(month)+"-01",name:x.name,category:x.category||(prev&&prev.r.category)||"Sem categoria",account:card,amount:-x.amount,person:prev?prev.r.person:"",card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")});
+    var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r),carry=/valor pendente|saldo pendente|saldo anterior|rotativo/i.test(x.name);
+    add.push({date:x.date||mid(month)+"-01",name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")});
   });
   return {add:add,dup:dup};
 }
@@ -788,31 +814,42 @@ function cardTabsHTML(){
   var avg=sameCard(S.card,GABI)?'<form class="avgbox" id="avgf"><span>Média mensal do '+esc(GABI)+', usada nos meses sem fatura importada:</span><input id="avg-v" inputmode="decimal" value="'+String(S.gabiAvg).replace(".",",")+'" aria-label="Média mensal"><button class="btn sm primary" type="submit">Salvar média</button></form>':'';
   return '<div class="cardtabs" role="tablist" aria-label="Cartões">'+[["all","Todos"]].concat(cards().map(function(c){return [c,c]})).map(function(c){
     var on=S.card===c[0]||(c[0]!=="all"&&S.card!=="all"&&sameCard(S.card,c[0]));
-    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+(c[0]!=="all"&&invoicePaid(c[0],i)?' · ✓ paga':'')+'</span></button>';
+    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+(c[0]!=="all"?(function(st){return st.full?' · ✓ paga':st.partial?' · falta '+BRL.format(st.left):''})(invoiceStatus(c[0],i)):'')+'</span></button>';
   }).join("")+'</div>'+avg;
 }
 /* Fatura paga: linha na aba Lancamentos com Valor 0 (para não contar o gasto duas vezes),
    [fatura-paga] [valor-pago=X] [primeira-parcela=AAAA-MM] na observação e o cartão na coluna Cartao. */
-function invoicePaid(card,i){return S.rows.find(function(r){return /\[fatura-paga\]/.test(r.notes)&&sameCard(r.card,card)&&firstMonth(r)===i});}
+/* Pode haver vários pagamentos (pago parcial): a fatura só fica paga quando a soma cobre o total. */
+function invoicePays(card,i){return S.rows.filter(function(r){return /\[fatura-paga\]/.test(r.notes)&&sameCard(r.card,card)&&firstMonth(r)===i}).sort(function(a,b){return a.date.localeCompare(b.date)});}
 function paidValue(r){var m=r.notes.match(/\[valor-pago=([\d.]+)\]/);return m?+m[1]:0;}
+function invoiceStatus(card,i,total){
+  if(total==null)total=cardMonthTotal(card,i);
+  var pays=invoicePays(card,i),paid=r2(pays.reduce(function(a,p){return a+paidValue(p)},0)),left=r2(Math.max(0,total-paid));
+  return {pays:pays,paid:paid,left:left,total:total,full:pays.length>0&&left<=0.009,partial:pays.length>0&&left>0.009};
+}
+function invoicePaid(card,i){return invoiceStatus(card,i).full;}
 function invoiceBox(i,total){
   if(S.card==="all"){
-    var cs=cards().filter(function(c){return cardMonthTotal(c,i)>0}),pd=cs.filter(function(c){return invoicePaid(c,i)});
-    return cs.length?'<div class="sub">'+pd.length+' de '+cs.length+' fatura'+(cs.length===1?'':'s')+' paga'+(cs.length===1?'':'s')+(cs.length>pd.length?' · falta: '+esc(cs.filter(function(c){return !invoicePaid(c,i)}).join(", ")):'')+'</div>':'';
+    var cs=cards().filter(function(c){return cardMonthTotal(c,i)>0}),st={};cs.forEach(function(c){st[c]=invoiceStatus(c,i)});
+    var pd=cs.filter(function(c){return st[c].full}),miss=cs.filter(function(c){return !st[c].full});
+    var leftAll=r2(miss.reduce(function(a,c){return a+st[c].left},0));
+    return cs.length?'<div class="sub">'+pd.length+' de '+cs.length+' fatura'+(cs.length===1?'':'s')+' paga'+(cs.length===1?'':'s')+(miss.length?' · falta pagar '+BRL.format(leftAll)+': '+esc(miss.map(function(c){return c+(st[c].partial?' (parcial)':'')}).join(", ")):'')+'</div>':'';
   }
-  var p=invoicePaid(S.card,i);
-  if(p)return '<div class="paidbox"><span class="pill paid">✓ Paga em '+esc(p.date.split("-").reverse().join("/"))+' · '+BRL.format(paidValue(p))+(p.account?' · '+esc(p.account):'')+'</span><button class="btn sm text" data-act="invunpay" data-id="'+esc(p.id)+'">desfazer</button></div>';
-  return total>0?'<div><button class="btn sm primary" data-act="invpay">Marcar fatura como paga</button></div>':'';
+  var s=invoiceStatus(S.card,i,total),last=s.pays[s.pays.length-1];
+  var hist=s.pays.map(function(p){return p.date.split("-").reverse().join("/")+' '+BRL.format(paidValue(p))}).join(" + ");
+  if(s.full)return '<div class="paidbox"><span class="pill paid">✓ Paga · '+esc(hist)+'</span><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'">desfazer</button></div>';
+  if(s.partial)return '<div class="paidbox"><span class="pill part">Pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left)+'</span><button class="btn sm primary" data-act="invpay">Pagar mais</button><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'" title="'+esc(hist)+'">desfazer último</button></div>';
+  return total>0?'<div><button class="btn sm primary" data-act="invpay">Registrar pagamento da fatura</button></div>':'';
 }
 function invoicePayFormHTML(){
-  var p=S.invPay,date=todayISO();
-  return '<div class="ov"><form class="dlg" id="invf" role="dialog" aria-modal="true" aria-label="Pagar fatura"><h3>Fatura '+esc(p.card)+' paga</h3><div class="sub">'+mname(p.month)+' · total da fatura '+BRL.format(p.total)+'</div><div class="two"><label>Valor pago (R$)<input id="iv-amt" required inputmode="decimal" value="'+String(p.total).replace(".",",")+'"></label><label>Data do pagamento<input id="iv-date" type="date" value="'+date+'"></label></div><label>Pago pela conta<input id="iv-acc" list="ivaccs" value="Banco do Brasil"><datalist id="ivaccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="sub">O pagamento fica registrado na planilha sem somar de novo nos gastos.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Marcar como paga</button></div></form></div>';
+  var p=S.invPay,date=todayISO(),s=invoiceStatus(p.card,p.month,p.total);
+  return '<div class="ov"><form class="dlg" id="invf" role="dialog" aria-modal="true" aria-label="Pagar fatura"><h3>Pagamento da fatura '+esc(p.card)+'</h3><div class="sub">'+mname(p.month)+' · total '+BRL.format(p.total)+(s.paid?' · já pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left):"")+'</div><div class="two"><label>Valor pago (R$)<input id="iv-amt" required inputmode="decimal" value="'+String(s.left||p.total).replace(".",",")+'"></label><label>Data do pagamento<input id="iv-date" type="date" value="'+date+'"></label></div><label>Pago pela conta<input id="iv-acc" list="ivaccs" value="Banco do Brasil"><datalist id="ivaccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="sub">Pode ser um valor parcial: o que faltar continua aparecendo para pagar depois. O pagamento fica na planilha sem somar de novo nos gastos.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Registrar pagamento</button></div></form></div>';
 }
 function submitInvoicePay(){
   var p=S.invPay,amt=parseAmount($("#iv-amt").value);
-  if(isNaN(amt)||amt<0){toast("Informe o valor pago.");return;}
+  if(isNaN(amt)||amt<=0){toast("Informe o valor pago.");return;}
   var row={date:$("#iv-date").value||todayISO(),name:"Pagamento fatura "+p.card,category:"Pagamento de fatura",account:$("#iv-acc").value.trim(),amount:0,person:BASE[0],card:p.card,status:"Debito",parcelas:1,notes:"[fatura-paga] [valor-pago="+r2(amt)+"] [primeira-parcela="+mid(p.month)+"]"};
-  if(commit([],[row])){S.invPay=null;toast("Fatura "+p.card+" marcada como paga.");}
+  if(commit([],[row])){S.invPay=null;var ns=invoiceStatus(p.card,p.month,p.total);toast(ns.full?"Fatura "+p.card+" paga.":"Pagamento registrado. Falta "+BRL.format(ns.left)+".");}
   render();
 }
 function heroHTML(rm){
@@ -970,7 +1007,6 @@ async function handleFile(file,password){
   var files=file&&file.length!=null&&!file.name?Array.prototype.slice.call(file):(file?[file]:[]);
   if(!files.length)return;
   file=files[0];
-  if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return;}
   toast("Lendo o arquivo…");
   try{
     var parts=[];
@@ -1295,6 +1331,8 @@ function submitIncome(){
 /* ---------- aba Gastos x Recebidos ---------- */
 function spendFor(i){
   var keep=S.card;S.card="all";var es;try{es=entriesFor(i)}finally{S.card=keep;}
+  /* o valor pendente do mês anterior (rotativo) já foi gasto no mês anterior: não conta de novo aqui */
+  es=es.filter(function(e){return !(e.row&&e.row.notes.indexOf("[pendente-anterior]")>-1)});
   var out=es.map(function(e){return {name:e.name,amount:e.amount,category:e.virtual?"Cartão Gabi (média)":(e.row.category||"Sem categoria"),card:e.virtual?GABI:(cardName(e.row.card)||"Sem cartão"),person:e.owner||"Sem dono",projected:e.projected}});
   houseFor(i).forEach(function(h){out.push({name:h.name,amount:h.amount,category:h.category,card:"Contas da casa",person:BASE[0],projected:!h.paid})});
   monthLoans(i).forEach(function(l){out.push({name:l.name,amount:l.inst,category:"Empréstimos",card:"Empréstimos",person:BASE[0],projected:!isPaid(l,i)})});
