@@ -208,7 +208,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
       <button class="btn" data-act="pessoas">Pessoas</button>
       <button class="btn" id="btnX" data-act="xlsx" hidden>Baixar tudo</button>
       <button class="btn primary" data-act="pick">Importar fatura</button>
-      <input type="file" id="file" accept=".csv,text/csv,text/plain" hidden>
+      <input type="file" id="file" accept=".csv,.txt,.ofx,.qfx,.xls,.xlsx,.pdf,.zip,text/csv,text/plain,application/pdf,application/zip" hidden>
     </div>
   </header>
   <nav class="tabs" aria-label="Seções"><button data-act="tab" data-t="fatura" id="tab-fatura">Fatura</button><button data-act="tab" data-t="emprestimos" id="tab-emprestimos">Empréstimos</button></nav>
@@ -217,10 +217,11 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
 </div>
 <div id="modal"></div>
 <div id="toast" role="status"></div>
-<div id="drop" hidden>Solte o CSV da fatura aqui</div>
+<div id="drop" hidden>Solte a fatura aqui (CSV, OFX, Excel, PDF ou ZIP)</div>
 
 <script type="module">window.FATURA_SCRIPT_URL=import.meta.env.VITE_GOOGLE_SCRIPT_URL||"";</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zip.js/zip.js@2.7.52/dist/zip-no-worker-inflate.min.js"></script>
 <script>
 (function(){
 "use strict";
@@ -252,11 +253,11 @@ var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":"c"+((n%8)+1)};
 function groups(t){return S.people.map(function(p){return {n:p,c:cls(p),v:t.by[p]||0}});}
 var seq=0;function newId(){return "n"+(++seq)+"_"+Date.now()}
 
-/* ---------- CSV da fatura ---------- */
+/* ---------- arquivos da fatura: CSV/TXT, OFX, Excel e ZIP (com ou sem senha) ---------- */
 function parseCSV(text){
   text=text.replace(/^﻿/,"");
-  var first=text.split(/\r?\n/)[0]||"";
-  var d=first.split(";").length>first.split(",").length?";":",";
+  var sample=text.split(/\r?\n/).slice(0,15).join("\n"),cnt=function(c){return sample.split(c).length-1};
+  var d=[";",",","\t"].sort(function(a,b){return cnt(b)-cnt(a)})[0];
   var rows=[],row=[],cur="",q=false;
   for(var i=0;i<text.length;i++){
     var c=text[i];
@@ -270,41 +271,70 @@ function parseCSV(text){
   return rows;
 }
 function parseAmount(s){
+  if(typeof s==="number")return s;
   s=String(s).replace(/R\$/g,"").replace(/\s/g,"");
-  var neg=s.indexOf("-")===0; s=s.replace("-","");
+  var neg=/^-|^\(.*\)$|-$/.test(s)||/D$/i.test(s); s=s.replace(/[-()]/g,"").replace(/[CD]$/i,"");
   if(s.indexOf(",")>-1) s=s.replace(/\./g,"").replace(",",".");
-  var n=parseFloat(s); return isNaN(n)?NaN:(neg?-n:n);
+  else if((s.match(/\./g)||[]).length>1) s=s.replace(/\./g,"");
+  var n=parseFloat(s); return isNaN(n)||!/\d/.test(s)?NaN:(neg?-n:n);
 }
 function normKey(name){
   return String(name).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/\s*\*\s*/g,"*").replace(/\s+/g," ").trim();
 }
 function parseTitle(t){
-  var name=t.trim(),cur=null,total=null;
-  var m=name.match(/\s*-?\s*(?:Parcela\s+)?(\d{1,2})\/(\d{1,2})\s*$/i);
-  if(m && +m[1]<=+m[2] && +m[2]>=2){cur=+m[1];total=+m[2];name=name.slice(0,m.index).trim().replace(/\s*-\s*$/,"");}
+  var name=String(t).trim(),cur=null,total=null;
+  var m=name.match(/\s*-?\s*(?:Parcela|PARC\.?)?\s*(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})\s*$/i);
+  if(m && +m[1]>=1 && +m[1]<=+m[2] && +m[2]>=2){cur=+m[1];total=+m[2];name=name.slice(0,m.index).trim().replace(/\s*-\s*$/,"");}
   name=name.replace(/^Parcelamento de Compra\s*-\s*/i,"");
   return {name:name,cur:cur,total:total};
 }
+function parseInstallment(v){var m=String(v||"").match(/(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})/);return m&&+m[1]>=1&&+m[1]<=+m[2]&&+m[2]>=2?{cur:+m[1],total:+m[2]}:null;}
+/* Datas: AAAA-MM-DD, DD/MM/AAAA, DD/MM/AA, DD/MM (ano deduzido), data do Excel */
+function itemDate(v){
+  if(v instanceof Date)return normDate(v);
+  var s=String(v==null?"":v).trim(),m;
+  if((m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2})$/)))return "20"+m[3]+"-"+pad(m[2])+"-"+pad(m[1]);
+  if((m=s.match(/^(\d{1,2})\/(\d{1,2})$/))){
+    var d=new Date(),y=d.getFullYear();
+    if(idx(y,+m[2])>nowIdx()+1)y--;
+    return y+"-"+pad(m[2])+"-"+pad(m[1]);
+  }
+  if(typeof v==="number"&&v>20000&&v<80000)return normDate(v);
+  var n=normDate(s);return /^\d{4}-\d{2}-\d{2}$/.test(n)?n:"";
+}
+function findHeader(rows){
+  for(var r=0;r<Math.min(rows.length,25);r++){
+    var h=rows[r].map(function(x){return normKey(x==null?"":String(x))});
+    var di=h.findIndex(function(x){return /data de compra|data da compra/.test(x)});
+    if(di<0)di=h.findIndex(function(x){return /^(data|date|dt)\b/.test(x)});
+    var ai=h.findIndex(function(x){return /(valor|amount).*(r\$|real)/.test(x)&&!/us\$|dolar|cotac/.test(x)});
+    if(ai<0)ai=h.findIndex(function(x){return /^(valor|amount|vlr)/.test(x)&&!/us\$|dolar|cotac/.test(x)});
+    var ti=-1;[/^(descri|title|estabelec|historic|nome do estab)/,/^lancamento/,/^detalhe/].some(function(re){ti=h.findIndex(function(x){return re.test(x)});return ti>=0;});
+    if(di>=0&&ai>=0&&ti>=0)return {r:r,di:di,ai:ai,ti:ti,ci:h.findIndex(function(x){return /^categ/.test(x)}),pi:h.findIndex(function(x){return /^parcela/.test(x)})};
+  }
+  return null;
+}
 function buildItems(rows){
-  var head=rows[0].map(function(x){return x.trim().toLowerCase()});
-  var di=head.findIndex(function(x){return /^(date|data)/.test(x)});
-  var ti=head.findIndex(function(x){return /^(title|descri|estabelec|lan)/.test(x)});
-  var ai=head.findIndex(function(x){return /^(amount|valor)/.test(x)});
-  var ci=head.findIndex(function(x){return /^(category|categ)/.test(x)});
-  var body;
-  if(di>=0&&ti>=0&&ai>=0) body=rows.slice(1); else {di=0;ti=1;ai=2;ci=-1;body=rows;}
+  var h=findHeader(rows),body;
+  if(h)body=rows.slice(h.r+1);else{h={di:0,ti:1,ai:2,ci:-1,pi:-1};body=rows;}
   var items=[];
   body.forEach(function(r){
-    if(r.length<=Math.max(di,ti,ai))return;
-    var amt=parseAmount(r[ai]); if(isNaN(amt))return;
-    var p=parseTitle(r[ti]);
-    items.push({date:normDate(r[di]),name:p.name,key:normKey(p.name),amount:r2(amt),cur:p.cur,total:p.total,category:ci>=0?(r[ci]||"").trim():"",ignored:false,reason:""});
+    if(!r||r.length<=Math.max(h.di,h.ti,h.ai))return;
+    var date=itemDate(r[h.di]);if(!date)return;
+    var amt=parseAmount(r[h.ai]);if(isNaN(amt))return;
+    var title=String(r[h.ti]==null?"":r[h.ti]).trim();if(!title)return;
+    var p=parseTitle(title),inst=h.pi>=0?parseInstallment(r[h.pi]):null;
+    if(inst&&!p.cur){p.cur=inst.cur;p.total=inst.total;}
+    items.push({date:date,name:p.name,key:normKey(p.name),amount:r2(amt),cur:p.cur,total:p.total,category:h.ci>=0?String(r[h.ci]||"").trim():"",ignored:false,reason:""});
   });
+  /* Alguns bancos mostram compras como valor negativo: inverte quando a maioria é negativa. */
+  var neg=items.filter(function(i){return i.amount<0}).length,pos=items.filter(function(i){return i.amount>0}).length;
+  if(neg>pos)items.forEach(function(i){i.amount=r2(-i.amount)});
   var pool=[];
   items.forEach(function(i){
-    if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
+    if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso|devolu/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
     else if(i.amount===0){i.ignored=true;i.reason="Valor zerado";}
-    else if(/pagamento recebido|valor pendente/i.test(i.name)){i.ignored=true;i.reason="Saldo da fatura anterior";}
+    else if(/pagamento recebido|pagamento efetuado|pagto|valor pendente|saldo anterior|saldo da fatura|total da fatura/i.test(i.name)){i.ignored=true;i.reason="Saldo ou pagamento da fatura";}
   });
   items.forEach(function(i){
     if(i.ignored||i.cur)return;
@@ -313,11 +343,117 @@ function buildItems(rows){
   });
   return items;
 }
+function parseOFX(text){
+  var out=[["date","title","amount"]],blocks=text.split(/<STMTTRN>/i).slice(1);
+  var tag=function(b,t){var x=b.match(new RegExp("<"+t+">\\s*([^<\\r\\n]*)","i"));return x?x[1].trim():"";};
+  var ent=function(s){return s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'")};
+  blocks.forEach(function(b){
+    b=b.split(/<\/STMTTRN>/i)[0];
+    var d=tag(b,"DTPOSTED"),amt=tag(b,"TRNAMT"),name=ent(tag(b,"MEMO")||tag(b,"NAME"));
+    if(d.length>=8&&amt)out.push([d.slice(0,4)+"-"+d.slice(4,6)+"-"+d.slice(6,8),name,parseFloat(amt.replace(",","."))]);
+  });
+  return out;
+}
+function decodeText(buf){
+  try{return new TextDecoder("utf-8",{fatal:true}).decode(buf);}catch(e){return new TextDecoder("windows-1252").decode(buf);}
+}
+function extOf(n){var m=String(n).toLowerCase().match(/\.([a-z0-9]+)$/);return m?m[1]:"";}
+async function itemsFromBuffer(name,buf,password){
+  var ext=extOf(name);
+  if(ext==="pdf")return buildItems(rowsFromLines(await pdfLines(buf,password)));
+  if(ext==="xls"||ext==="xlsx"||ext==="xlsm"){
+    if(!window.XLSX)throw {msg:"Não consegui carregar o leitor de Excel. Recarregue a página."};
+    var wb=XLSX.read(buf,{type:"array",cellDates:true}),best=[];
+    wb.SheetNames.forEach(function(n){var rows=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:""});var it=buildItems(rows);if(it.length>best.length)best=it;});
+    return best;
+  }
+  var text=decodeText(buf);
+  if(ext==="ofx"||ext==="qfx"||/OFXHEADER|<OFX>/i.test(text.slice(0,3000)))return buildItems(parseOFX(text));
+  return buildItems(parseCSV(text));
+}
+var SUPPORTED=/\.(csv|txt|ofx|qfx|xls|xlsx|xlsm|pdf)$/i;
+async function unzipAll(file,password){
+  if(!window.zip)throw {msg:"Não consegui carregar o leitor de ZIP. Recarregue a página."};
+  var reader=new zip.ZipReader(new zip.BlobReader(file));
+  try{
+    var entries=(await reader.getEntries()).filter(function(e){return !e.directory&&SUPPORTED.test(e.filename)&&!/(^|\/)__MACOSX\//.test(e.filename)});
+    if(!entries.length)throw {msg:"O ZIP não tem CSV, OFX, Excel ou PDF da fatura."};
+    if(entries.some(function(e){return e.encrypted})&&!password)throw {code:"password"};
+    var out=[];
+    for(var n=0;n<entries.length;n++){
+      var e=entries[n],data;
+      try{data=await e.getData(new zip.Uint8ArrayWriter(),password?{password:password}:{});}
+      catch(err){if(/password|encrypt/i.test(String(err&&err.message)))throw {code:"password",wrong:!!password};throw err;}
+      out.push({name:e.filename.split("/").pop(),buf:data});
+    }
+    return out;
+  }finally{try{await reader.close()}catch(e){}}
+}
 function guessMonth(name,items){
-  var m=(name||"").match(/(\d{4})-(\d{2})-(\d{2})/);
-  if(m) return m[1]+"-"+m[2];
+  var m=(name||"").match(/(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})/);
+  if(m&&+m[2]>=1&&+m[2]<=12) return m[1]+"-"+m[2];
   var latest=items.map(function(i){return i.date}).filter(Boolean).sort().pop();
   return latest?latest.slice(0,7):mid(nowIdx());
+}
+function guessCard(name){
+  var k=normKey(name);
+  if(/nubank|nu pagamentos/.test(k))return "Nubank";
+  if(/itau/.test(k))return "Itaú";
+  if(/\bc6\b|c6bank/.test(k))return "C6";
+  if(/\bbb\b|banco do brasil|ourocard/.test(k))return "Banco do Brasil";
+  return S.card==="all"?"Nubank":S.card;
+}
+/* PDF: lê o texto com pdf.js (carregado só quando precisa) e reconhece linhas "data · descrição · valor". */
+var pdfReady=null,PDFJS="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/";
+function loadPdfJs(){
+  if(window.pdfjsLib)return Promise.resolve();
+  if(!pdfReady)pdfReady=new Promise(function(res,rej){
+    var s=document.createElement("script");s.src=PDFJS+"pdf.min.js";
+    s.onload=function(){window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS+"pdf.worker.min.js";res();};
+    s.onerror=function(){pdfReady=null;rej({msg:"Não consegui carregar o leitor de PDF. Confira a conexão."});};
+    document.head.appendChild(s);
+  });
+  return pdfReady;
+}
+async function pdfLines(buf,password){
+  await loadPdfJs();
+  var doc;
+  try{doc=await window.pdfjsLib.getDocument({data:buf,password:password||undefined}).promise;}
+  catch(e){if(e&&e.name==="PasswordException")throw {code:"password",wrong:e.code===2};throw {msg:"Não consegui abrir esse PDF."};}
+  var lines=[];
+  for(var p=1;p<=doc.numPages;p++){
+    var tc=await (await doc.getPage(p)).getTextContent(),its=[];
+    tc.items.forEach(function(it){if(it.str&&it.str.trim())its.push({x:it.transform[4],y:it.transform[5],s:it.str,w:it.width||0});});
+    its.sort(function(a,b){return b.y-a.y||a.x-b.x});
+    var groups=[];
+    its.forEach(function(it){var g=groups[groups.length-1];if(g&&Math.abs(g.y-it.y)<=2.5)g.items.push(it);else groups.push({y:it.y,items:[it]});});
+    groups.forEach(function(g){
+      var line="",end=null;
+      g.items.sort(function(a,b){return a.x-b.x}).forEach(function(q){if(end!=null&&q.x-end>1)line+=" ";line+=q.s;end=q.x+q.w;});
+      lines.push(line.replace(/\s+/g," ").trim());
+    });
+  }
+  return lines;
+}
+var MON={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
+function rowsFromLines(lines){
+  var DATE="(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\s(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\.?)";
+  var AMT="(-\s?)?(?:R\$\s?)?(-\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})(\s?-)?";
+  var re=new RegExp(DATE+"\s+(.+?)\s+"+AMT+"(?=\s+"+DATE+"\s|\s*$)","gi");
+  var rows=[["date","title","amount"]];
+  lines.forEach(function(line){
+    var m;re.lastIndex=0;
+    while((m=re.exec(line))){
+      var d=m[1],dm=d.match(/^(\d{1,2})\s([a-z]{3})/i);
+      if(dm)d=dm[1]+"/"+MON[normKey(dm[2])];
+      var title=m[2].replace(/[•*·]{2,}\s?\d{4}/g,"").replace(/\s+(?:US\$|USD)\s?[\d.,]+/gi,"").replace(/\s*R\$\s*$/,"").replace(/\s+/g," ").trim();
+      if(!/[a-zà-ú]{2}/i.test(title.replace(/R\$/g,"")))continue;
+      if(/^(total|subtotal|saldo|limite|vencimento|fatura anterior|encargos|pagamento minimo)/i.test(normKey(title)))continue;
+      var v=parseAmount(m[5]);if(isNaN(v))continue;
+      rows.push([d,title,(m[3]||m[4]||m[6])?-v:v]);
+    }
+  });
+  return rows;
 }
 
 /* ---------- linhas da planilha ---------- */
@@ -633,7 +769,7 @@ function histHTML(rm){
   return '<section class="card"><div class="ch"><h2>Histórico de faturas</h2></div><p class="hnote">Cada compra fica registrada como uma linha na planilha Google. Importar de novo a mesma fatura não duplica nada.</p><div class="hist">'+rows+'</div></section>';
 }
 function startHTML(){
-  return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
+  return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>Exporte a fatura do banco (CSV, OFX, Excel, PDF ou ZIP, com ou sem senha) e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo da fatura</button><div class="steps"><div class="step"><b>1 · Importe</b>CSV, OFX, Excel, PDF ou ZIP da fatura.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
 function renderChrome(){
   var lo=S.tab==="emprestimos";
@@ -678,6 +814,9 @@ function modalHTML(){
     var defCard=S.card==="all"?"Nubank":S.card;
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
+  if(S.askPass){
+    return '<div class="ov"><form class="dlg" id="pwf" role="dialog" aria-modal="true" aria-label="Senha do arquivo"><h3>Arquivo protegido por senha</h3><div class="sub">'+esc(S.askPass.file.name)+'</div><label>Senha<input id="pw" type="password" autocomplete="off" required placeholder="Geralmente os números do CPF"></label>'+(S.askPass.wrong?'<div class="warnbox">Senha incorreta. Tente de novo.</div>':"")+'<div class="sub">A senha é usada só para abrir o arquivo neste navegador; não é salva nem enviada.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Abrir</button></div></form></div>';
+  }
   if(S.newp){
     return '<div class="ov"><form class="dlg" id="newpf" role="dialog" aria-modal="true" aria-label="Outra pessoa"><h3>De quem é essa compra?</h3><label>Nome da pessoa<input id="np-name" required maxlength="24" placeholder="Ex.: Alessandra, Mãe"></label><div class="sub">O nome vai para a coluna “Quem usou” da planilha.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
   }
@@ -692,17 +831,23 @@ function modalHTML(){
 }
 
 /* ---------- importar / lançar ---------- */
-async function handleFile(file){
+async function handleFile(file,password){
   if(!file)return;
   if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return;}
+  toast("Lendo o arquivo…");
   try{
-    var text=await file.text(),rows=parseCSV(text);
-    if(rows.length<1)throw new Error("vazio");
-    var items=buildItems(rows);
-    if(!items.length)throw new Error("sem linhas");
-    S.pending={file:file.name,items:items,month:guessMonth(file.name,items),card:S.card==="all"?"Nubank":S.card};
-    render();
-  }catch(e){toast("Não consegui ler esse arquivo. Use o CSV exportado da fatura do Nubank.");}
+    var parts=extOf(file.name)==="zip"?await unzipAll(file,password):[{name:file.name,buf:new Uint8Array(await file.arrayBuffer())}];
+    var items=[];
+    for(var n=0;n<parts.length;n++)items=items.concat(await itemsFromBuffer(parts[n].name,parts[n].buf,password));
+    if(!items.length)throw {msg:"Não encontrei compras nesse arquivo. Confira se é a fatura do cartão."};
+    var names=parts.map(function(x){return x.name}).join(", "),all=names+" "+file.name;
+    S.askPass=null;
+    S.pending={file:names===file.name?file.name:file.name+" → "+names,items:items,month:guessMonth(all,items),card:guessCard(all)};
+    toast("");render();
+  }catch(e){
+    if(e&&e.code==="password"){toast("");S.askPass={file:file,wrong:!!e.wrong};render();var pi=$("#pw");if(pi)pi.focus();return;}
+    toast(e&&e.msg||"Não consegui ler esse arquivo. Use CSV, OFX, Excel, PDF ou ZIP da fatura.");
+  }
 }
 function confirmImport(){
   var p=S.pending;if(!p)return;
@@ -796,7 +941,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -973,12 +1118,13 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
-  if(id==="loanf"){ev.preventDefault();submitLoan();}
+  if(id==="pwf"){ev.preventDefault();var f=S.askPass&&S.askPass.file,pw=$("#pw").value;if(f)handleFile(f,pw);}
+  else if(id==="loanf"){ev.preventDefault();submitLoan();}
   else if(id==="addf"){ev.preventDefault();addManual();}
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
