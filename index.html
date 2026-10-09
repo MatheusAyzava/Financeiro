@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#11121A">
-<title>Fatura da Gabi Nubank</title>
+<title>Fatura do Cartão</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2214%22 fill=%22%23F06BAA%22/%3E%3Cpath d=%22M16 2a14 14 0 0 1 12 21L16 16z%22 fill=%22%23F2BE4A%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
 <style>
@@ -184,10 +184,9 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
   <header class="top">
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
-      <div><h1>Fatura da Gabi Nubank</h1><p>Gastos do cartão divididos por pessoa</p></div>
+      <div><h1>Fatura do Cartão</h1><p>Gastos do cartão divididos por pessoa</p></div>
     </div>
     <div class="actions">
-      <a class="btn" href="/fincontrol/">FinControl</a>
       <button class="btn" data-act="pessoas">Pessoas</button>
       <button class="btn" id="btnX" data-act="xlsx" hidden>Baixar tudo</button>
       <button class="btn primary" data-act="pick">Importar fatura</button>
@@ -208,7 +207,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
 <script>
 (function(){
 "use strict";
-var BASE=["Gabi","Alê"];
+var BASE=["Matheus"];
 var MESES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 var MS=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 var BRL=new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"});
@@ -227,13 +226,8 @@ var DEFAULT_START=idx(2026,10), DEFAULT_END=idx(2027,12);
 
 var S={bills:{},rules:{},people:BASE.slice(),sel:null,filter:"all",view:"chart",open:{},showIgn:false,ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:0};
 var isP=function(o){return S.people.indexOf(o)>-1};
-var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":n<BASE.length?"c"+(n+1):"c3"};
-/* Resumo: Gabi, Alê e "Outro" (soma de todas as outras pessoas) */
-function groups(t){
-  var extra=S.people.slice(BASE.length),ov=0;
-  extra.forEach(function(p){ov+=t.by[p]||0});
-  return BASE.map(function(p){return {n:p,c:cls(p),v:t.by[p]||0}}).concat([{n:"Outro",c:"c3",v:r2(ov),who:extra.filter(function(p){return t.by[p]>0})}]);
-}
+var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":"c"+((n%8)+1)};
+function groups(t){return S.people.map(function(p){return {n:p,c:cls(p),v:t.by[p]||0}});}
 
 /* ---------- parsing ---------- */
 function parseCSV(text){
@@ -357,15 +351,13 @@ function syncPeople(){
 
 /* ---------- persistence ---------- */
 /* Cópia local no navegador + sincronização com a planilha Google (aba "Faturas")
-   pelo mesmo Apps Script do FinControl. Cada linha da aba guarda uma chave
+   pelo Apps Script da planilha. Cada linha da aba guarda uma chave
    ("bill:2026-10", "rules" ou "people") e o JSON correspondente. */
 var dirty={},rulesDirty=false,peopleDirty=false,timer=null,chain=Promise.resolve(),scriptUrl="",syncState="local";
-function saveLocal(){try{localStorage.setItem("fatura-gabi-v1",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)}))}catch(e){}}
-function loadLocal(){try{var d=JSON.parse(localStorage.getItem("fatura-gabi-v1")||"null");if(d){S.bills=d.bills||{};S.rules=d.rules||{};S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));}}catch(e){}}
+function saveLocal(){try{localStorage.setItem("fatura-matheus-v1",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)}))}catch(e){}}
+function loadLocal(){try{var d=JSON.parse(localStorage.getItem("fatura-matheus-v1")||"null");if(d){S.bills=d.bills||{};S.rules=d.rules||{};S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));}}catch(e){}}
 function getScriptUrl(){
-  var u="";
-  try{var c=JSON.parse(localStorage.getItem("fincontrol:sheets-config")||"null");if(c&&c.scriptUrl)u=String(c.scriptUrl).trim();}catch(e){}
-  return u||String(window.FATURA_SCRIPT_URL||"").trim();
+  return String(window.FATURA_SCRIPT_URL||"").trim();
 }
 function jsonp(url,params,ms){
   return new Promise(function(resolve,reject){
@@ -448,10 +440,10 @@ async function init(){
 }
 function note(){
   var t={
-    local:"Salvo neste navegador. Configure a planilha Google no FinControl para sincronizar entre aparelhos.",
+    local:"Salvo neste navegador.",
     loading:"Carregando da planilha Google…",
     sheet:"Sincronizado com a planilha Google (aba Faturas).",
-    old:"Não consegui ler a aba Faturas da planilha. Atualize o Apps Script (veja o README). Por enquanto, salvo só neste navegador."
+    old:"Salvo neste navegador. A planilha Google entra quando o Apps Script for atualizado."
   }[syncState];
   $("#note").textContent=t;
 }
@@ -461,7 +453,7 @@ function saveFile(filename,data,type){
   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000);
 }
 function exportBackup(){
-  saveFile("fatura-gabi-backup-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)},null,2),"application/json");
+  saveFile("fatura-backup-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)},null,2),"application/json");
   toast("Backup baixado.");
 }
 async function importBackup(file){
@@ -589,7 +581,7 @@ function listHTML(){
   order.sort(function(a,c){return groups[c].sum-groups[a].sum});
   var chipList=[["all","Todos"]].concat(S.people.map(function(p){return [p,p]})).concat([["none","Sem dono"]]);
   var chips=chipList.map(function(c){return '<button class="chip'+(f===c[0]?' on':'')+'" data-act="filter" data-f="'+esc(c[0])+'">'+esc(c[1])+'<b class="num">'+counts[c[0]]+'</b></button>'}).join("");
-  var banner=counts.none>0?'<div class="banner"><span>'+counts.none+' lançamento'+(counts.none===1?'':'s')+' sem dono neste mês.</span><span><button class="btn sm" data-act="allnone" data-p="Gabi">Marcar tudo como Gabi</button></span></div>':'';
+  var banner=counts.none>0?'<div class="banner"><span>'+counts.none+' lançamento'+(counts.none===1?'':'s')+' sem dono neste mês.</span><span><button class="btn sm" data-act="allnone" data-p="'+esc(BASE[0])+'">Marcar tudo como '+esc(BASE[0])+'</button></span></div>':'';
   var rows=order.map(function(g){
     var G=groups[g],owners={};G.items.forEach(function(e){owners[e.owner||""]=1});
     var ow=Object.keys(owners).length===1?Object.keys(owners)[0]:"";
@@ -609,7 +601,7 @@ function listHTML(){
   if(ign.length){
     ignHTML='<div class="ign"><button class="btn text sm" data-act="showign">'+(S.showIgn?'Esconder':'Ver')+' fora da conta ('+ign.length+')</button>'+(S.showIgn?'<div class="det">'+ign.map(function(x){return '<div><span class="dn">'+(dateBR(x.date)?dateBR(x.date)+' · ':'')+esc(x.name)+' <span class="tag">'+esc(x.reason)+'</span></span><span class="da num">'+BRL.format(x.amount)+' <button data-act="inc" data-src="'+k+'" data-id="'+esc(x.id)+'">incluir</button></span></div>'}).join("")+'</div>':'')+'</div>';
   }
-  var pdl=isP(f)&&counts[f]>0?'<button class="btn sm primary" data-act="pxlsx" data-p="'+esc(f)+'">Baixar lista da '+esc(f)+'</button><button class="btn sm" data-act="pcopy" data-p="'+esc(f)+'">Copiar texto</button>':'';
+  var pdl=isP(f)&&counts[f]>0?'<button class="btn sm primary" data-act="pxlsx" data-p="'+esc(f)+'">Baixar lista de '+esc(f)+'</button><button class="btn sm" data-act="pcopy" data-p="'+esc(f)+'">Copiar texto</button>':'';
   var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="addform">+ Lançamento</button>'+(real?'<button class="btn sm text" data-act="delbill" data-m="'+k+'">Excluir fatura</button>':'')+'</div></div>';
   return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div>'+ignHTML+'</section>';
 }
@@ -624,7 +616,7 @@ function histHTML(){
   return '<section class="card"><div class="ch"><h2>Histórico de faturas</h2></div><p class="hnote">Cada fatura importada fica guardada pelo mês dela. Importar a de novembro não apaga a de outubro; só substitui se você importar o mesmo mês outra vez.</p><div class="hist">'+rows+'</div></section>';
 }
 function startHTML(){
-  return '<section class="card start"><span class="pill">Nenhuma fatura ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. As parcelas ainda em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Gabi, Alê ou escreva o nome de outra pessoa. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
+  return '<section class="card start"><span class="pill">Nenhuma fatura ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. As parcelas ainda em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
 function render(){
   var m=$("#main");
@@ -652,7 +644,7 @@ function modalHTML(){
   }
   if(S.pessoas){
     var extras=S.people.slice(BASE.length).map(function(p,n){return '<div class="pl"><input value="'+esc(p)+'" maxlength="24" data-orig="'+esc(p)+'" aria-label="Nome"><button class="btn sm" data-act="renp" data-p="'+esc(p)+'">Renomear</button><button class="btn sm text" data-act="remp" data-p="'+esc(p)+'">Remover</button></div>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Pessoas"><h3>Pessoas</h3><div class="sub">Gabi e Alê são fixas. As outras pessoas somam no card “Outro”. Adicione quem mais divide a fatura com você.</div>'+(extras||'<div class="sub">Nenhuma outra pessoa ainda.</div>')+'<form class="pl" id="addpf"><input id="ap-name" maxlength="24" placeholder="Nome da nova pessoa" aria-label="Nome da nova pessoa"><button class="btn primary sm" type="submit">Adicionar</button></form><div class="foot"><button class="btn" data-act="cancel">Fechar</button></div></div></div>';
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Pessoas"><h3>Pessoas</h3><div class="sub">Você (Matheus) é fixo. Adicione quem mais divide a fatura com você.</div>'+(extras||'<div class="sub">Nenhuma outra pessoa ainda.</div>')+'<form class="pl" id="addpf"><input id="ap-name" maxlength="24" placeholder="Nome da nova pessoa" aria-label="Nome da nova pessoa"><button class="btn primary sm" type="submit">Adicionar</button></form><div class="foot"><button class="btn" data-act="cancel">Fechar</button></div></div></div>';
   }
   if(S.text){
     return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Texto"><h3>'+esc(S.text.title)+'</h3><textarea id="txt" readonly>'+esc(S.text.body)+'</textarea><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
@@ -703,7 +695,7 @@ function personEntries(p){
 function personText(p){
   var es=personEntries(p),g={},order=[],tot=0;
   es.forEach(function(e){var k=e.key+"|"+(e.total||"")+"|"+e.src;if(!g[k]){g[k]={name:e.name,cur:e.cur,total:e.total,n:0,sum:0};order.push(k);}g[k].n++;g[k].sum+=e.amount;tot+=e.amount;});
-  var L=["Fatura do cartão Nubank da Gabi","Referente a "+mname(S.sel)+" — "+p,""];
+  var L=["Fatura do cartão","Referente a "+mname(S.sel)+" — "+p,""];
   order.forEach(function(k){var x=g[k];L.push("• "+x.name+(x.total?" ("+x.cur+"/"+x.total+")":"")+(x.n>1?" ×"+x.n:"")+" — "+BRL.format(r2(x.sum)));});
   L.push("","Total: "+BRL.format(r2(tot)));
   var next=[];
@@ -722,7 +714,7 @@ async function exportPerson(p){
   try{
     if(!window.XLSX){toast("Download indisponível aqui.");return;}
     var i=S.sel,es=personEntries(p),real=S.bills[mid(i)]&&S.bills[mid(i)].imported;
-    var A=[["Fatura do cartão Nubank da Gabi — "+p],[mname(i)+(real?"":" (previsão)")],[],["Data","Descrição","Parcela","Valor (R$)"]];
+    var A=[["Fatura do cartão — "+p],[mname(i)+(real?"":" (previsão)")],[],["Data","Descrição","Parcela","Valor (R$)"]];
     var sum=0;
     es.forEach(function(e){sum+=e.amount;A.push([dateBR(e.date),e.name,e.total?e.cur+"/"+e.total:(e.kind==="recorrente"?"mensal":""),{t:"n",v:e.amount,z:"#,##0.00"}]);});
     A.push(["","Total","",{t:"n",v:r2(sum),f:"SUM(D5:D"+(4+es.length)+")",z:"#,##0.00"}]);
@@ -734,7 +726,7 @@ async function exportPerson(p){
     XLSX.utils.book_append_sheet(wb,w2,"Próximos meses");
     var buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
     saveFile("Fatura_"+safe(p)+"_"+mid(i)+".xlsx",buf);
-    toast("Lista da "+p+" pronta.");
+    toast("Lista de "+p+" pronta.");
   }catch(e){toast("Não foi possível gerar a lista.");}
 }
 async function exportXlsx(){
@@ -758,7 +750,7 @@ async function exportXlsx(){
     var w2=XLSX.utils.aoa_to_sheet(B);w2["!cols"]=[{wch:20},{wch:38},{wch:12},{wch:12},{wch:9},{wch:12},{wch:11}];
     XLSX.utils.book_append_sheet(wb,w2,"Lançamentos");
     var buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-    saveFile("Fatura_Gabi_Nubank.xlsx",buf);
+    saveFile("Fatura_cartao.xlsx",buf);
     toast("Planilha pronta.");
   }catch(e){toast("Não foi possível gerar a planilha.");}
 }

@@ -5,5 +5,5 @@ dist
 .DS_Store
 
 # backups com dados pessoais
-fatura-gabi-backup*.json
+fatura-*backup*.json
 .claude/

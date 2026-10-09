@@ -1,6 +1,6 @@
-# FinControl
+# Fatura do Cartão
 
-Aplicativo de controle financeiro em React, inspirado no prototipo criado no Lovable. Ele mostra visao geral, lancamentos, planejamento, configuracoes e pode carregar os dados direto do Google Sheets.
+Página para dividir a fatura do cartão por pessoa. Importe o CSV da fatura (formato do Nubank), escolha de quem é cada compra e veja as parcelas projetadas mês a mês.
 
 ## Como rodar
 
@@ -9,117 +9,20 @@ npm install
 npm run dev
 ```
 
-Depois abra o endereco exibido pelo Vite no navegador. A pagina inicial e a Fatura da Gabi; o FinControl fica em `/fincontrol/`.
+## Como usar
 
-## Configurar Google Sheets pela tela do app
+- **Importar fatura**: escolha o CSV exportado da fatura. Cada fatura fica guardada pelo mês dela.
+- **Dono de cada compra**: Matheus é fixo; use `Outro…` ou `Pessoas` para adicionar quem mais usou o cartão. O app lembra o dono nas próximas faturas.
+- **Parcelas**: compras parceladas aparecem listradas como previsão nos meses seguintes.
+- **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
+- **Baixar backup / Restaurar backup**: leva os dados para outro navegador ou aparelho.
 
-1. Entre em `Configuracoes`.
-2. Cole sua chave da API do Google.
-3. Cole a URL completa da planilha ou apenas o ID.
-4. Mantenha o intervalo como `Lancamentos!A:J`, se a aba tiver esse nome.
-5. Clique em `Salvar e sincronizar`.
+## Dados
 
-A configuracao fica salva no navegador.
+Os dados ficam salvos no navegador. Para sincronizar com a planilha Google:
 
-## Configurar Google Sheets por .env
+1. Na planilha, abra `Extensões > Apps Script`, apague o código e cole o conteúdo de [`apps-script/Code.gs`](apps-script/Code.gs).
+2. `Implantar > Gerenciar implantações`, clique no lápis, escolha `Nova versão` e `Implantar` (ou `Nova implantação` > `App da Web`, executar como `Eu`, acesso `Qualquer pessoa`, se ainda não houver uma).
+3. No Netlify, defina a variável `VITE_GOOGLE_SCRIPT_URL` com a URL que termina em `/exec` e faça um novo deploy.
 
-1. Copie `.env.example` para `.env`.
-2. Preencha:
-
-```bash
-VITE_GOOGLE_API_KEY=sua_chave_da_api
-VITE_GOOGLE_SHEET_ID=id_da_sua_planilha
-VITE_GOOGLE_SHEET_RANGE=Lancamentos!A:J
-VITE_GOOGLE_SCRIPT_URL=url_do_web_app_do_google_apps_script
-```
-
-O ID da planilha fica na URL:
-
-```text
-https://docs.google.com/spreadsheets/d/ESTE_E_O_ID_DA_PLANILHA/edit
-```
-
-## Formato da aba Lancamentos
-
-A primeira linha deve ser o cabecalho. As 5 primeiras colunas sao obrigatorias e as demais sao opcionais:
-
-```text
-Data | Descricao | Categoria | Conta | Valor | Quem usou | Cartao | Status | Parcelas | Observacao
-```
-
-Exemplo:
-
-```text
-2026-06-23 | Supermercado | Alimentacao | Banco do Brasil | -1400 | Eu | Nubank | Debito | 1 |
-2026-06-23 | Combustivel | Transporte | Banco do Brasil | -200 | Matheus | Banco do Brasil | Debito | 1 | Emprestei o cartao
-2026-06-15 | Salario | Salario | Banco do Brasil | 3150 | Eu | | Credito | 1 |
-```
-
-Valores positivos entram como receita e normalmente usam status `Credito`. Valores negativos entram como despesa e normalmente usam status `Debito`.
-
-## Gravar novos lancamentos no Google Sheets
-
-A Google Sheets API com `VITE_GOOGLE_API_KEY` serve para ler a planilha. Para gravar novos lancamentos, crie um Web App no Google Apps Script:
-
-1. Na planilha, clique em `Extensoes > Apps Script`.
-2. Apague o conteudo inicial e cole todo o codigo do arquivo [`apps-script/Code.gs`](apps-script/Code.gs).
-
-3. Clique em `Implantar > Nova implantacao`.
-4. Tipo: `App da Web`.
-5. Executar como: `Eu`.
-6. Quem tem acesso: `Qualquer pessoa`.
-7. Clique em `Implantar` e copie a URL que termina em `/exec`.
-8. No Netlify, crie a variavel:
-
-```text
-VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
-```
-
-Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, edicoes atualizarao a linha correspondente, exclusoes feitas no app tambem removerao a linha correspondente da planilha, e todos os dispositivos passarao a carregar os lancamentos direto do Apps Script.
-
-## Fatura da Gabi (rateio do cartao)
-
-A pagina inicial (`/`) divide a fatura do cartao Nubank por pessoa (Gabi, Ale e Outro). Importe o CSV da fatura, escolha de quem e cada compra e veja as parcelas projetadas mes a mes.
-
-Os dados ficam na aba `Faturas` da mesma planilha, usando o mesmo Apps Script (`VITE_GOOGLE_SCRIPT_URL` ou a URL salva em `Configuracoes`). A aba e criada sozinha na primeira gravacao. Se o Apps Script ainda for a versao antiga, a pagina salva so no navegador ate ele ser atualizado.
-
-Para atualizar o Apps Script sem trocar a URL: `Implantar > Gerenciar implantacoes`, clique no lapis, escolha `Nova versao` e `Implantar`.
-
-## Vencimentos e lembretes
-
-Na tela `Planejamento`, voce pode cadastrar:
-
-- Cartoes com dia de fechamento e dia de vencimento, por exemplo Nubank vencendo dia 8.
-- Despesas fixas de contas recorrentes, por exemplo aluguel, internet, MEI, energia ou qualquer compromisso mensal.
-- Metas financeiras, como reserva de emergencia, viagem ou quitar uma divida.
-- Dividas e emprestimos, separando valores a receber e valores a pagar.
-
-Os cards aparecem no mes selecionado e podem ser marcados como pagos. A tela tambem mostra o total de despesas fixas do periodo, e essas despesas entram no resumo financeiro da `Visao Geral` como despesas do mes. Despesas fixas podem ser editadas ou removidas no proprio card. Nos cards de cartao, use `Editar vencimento` para alterar dia de vencimento, fechamento, nome e valor previsto. A `Visao Geral` tambem mostra os proximos vencimentos pendentes para evitar esquecer contas importantes.
-
-## Cartoes, pessoas e parcelas
-
-- Receitas como `Salario` entram como credito, somam no saldo e nao usam campos de parcelas.
-- Categorias novas digitadas no cadastro ou na edicao, como `Animais` e `Eletronicos`, sao salvas nas sugestoes para proximos lancamentos.
-- Ao cadastrar uma despesa parcelada, o app cria automaticamente uma parcela por mes a partir do mes seguinte. Exemplo: compra feita em maio em `3x` cria parcelas em junho, julho e agosto.
-- No cadastro, escolha se o valor digitado e o `Valor total da compra` ou o `Valor de cada parcela`. O padrao e `Valor de cada parcela`, para o app nao dividir novamente valores como `29,49`.
-- Se voce escolher `Valor total da compra`, o app divide o valor pelo numero de parcelas.
-- Use o campo `Primeira parcela` para retroativos. Exemplo: se a primeira parcela foi em marco, selecione `marco/2026` e o app projeta marco, abril, maio etc.
-- Se uma linha ja existir na planilha com `Parcelas` maior que `1`, o app tambem projeta essas parcelas nos meses seguintes ao carregar os dados.
-- Ao editar uma parcela projetada, o app edita a compra original da planilha e recalcula as parcelas.
-- Ao excluir uma parcela projetada, o app exclui a compra original e remove todas as parcelas daquele parcelamento.
-- A planilha deve guardar apenas a compra original. O app mostra as parcelas futuras automaticamente, no estilo `Parcela 1 de 3`, `Parcela 2 de 3`.
-- O campo `Parcelas` aceita compras longas, como `48x` ou `60x`.
-- A tela `Cartoes` mostra o total geral da fatura por cartao, incluindo valores seus, da Gabi e de outras pessoas. Quando houver gastos de terceiros, tambem mostra o total a receber separado.
-- Em `Lancamentos`, use os filtros por pessoa e por cartao para ver rapidamente tudo que Matheus, Gabi, Alessandra ou uma fatura especifica usou no mes. Ao filtrar uma pessoa, o app mostra um relatorio agrupado por cartao com itens e total de cada fatura.
-- A lista de `Lancamentos` tem paginacao e permite mostrar 25, 50, 100, 200 ou todos os lancamentos encontrados.
-- Ao filtrar um cartao especifico, o periodo passa a seguir o dia de fechamento cadastrado no cartao. Assim uma compra feita depois do fechamento entra na fatura do mes seguinte, como no aplicativo do banco.
-- `Matheus` e `Gabi` sao tratados como donos, entao nao entram no resumo de cartao emprestado. Valores de outras pessoas continuam aparecendo como emprestado.
-
-## Relatorios e backup
-
-- A tela `Relatorios` compara receitas, despesas e saldo do mes atual com o mes anterior.
-- Em `Configuracoes`, voce pode exportar os lancamentos em CSV, baixar um backup JSON e restaurar um backup.
-
-## Observacao sobre a chave
-
-Chave de API no frontend deve ser usada apenas para leitura de planilhas publicas ou com restricao por dominio no Google Cloud. Mesmo salva pela tela do app, ela fica no navegador do usuario. Se voce quiser gravar lancamentos na planilha, o caminho mais seguro e usar um backend com OAuth ou conta de servico.
+Na primeira vez que a planilha responder, o que já estiver salvo no navegador é enviado para a aba `Faturas` (criada automaticamente). Depois disso, todos os aparelhos usam a planilha.

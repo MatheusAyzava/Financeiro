@@ -9,3 +9,8 @@
   from = "/fatura/*"
   to = "/"
   status = 301
+
+[[redirects]]
+  from = "/fincontrol/*"
+  to = "/"
+  status = 301
