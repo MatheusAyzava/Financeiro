@@ -330,6 +330,10 @@ function buildItems(rows){
   /* Alguns bancos mostram compras como valor negativo: inverte quando a maioria é negativa. */
   var neg=items.filter(function(i){return i.amount<0}).length,pos=items.filter(function(i){return i.amount>0}).length;
   if(neg>pos)items.forEach(function(i){i.amount=r2(-i.amount)});
+  /* Faturas que mostram a prévia das próximas parcelas (06/12 e 07/12 da mesma compra): fica só a menor. */
+  var firstInst={};
+  items.forEach(function(i){if(!i.cur)return;var k=i.key+"|"+i.total+"|"+i.amount.toFixed(2);if(!firstInst[k]||i.cur<firstInst[k].cur)firstInst[k]=i;});
+  items=items.filter(function(i){return !i.cur||firstInst[i.key+"|"+i.total+"|"+i.amount.toFixed(2)]===i;});
   var pool=[];
   items.forEach(function(i){
     if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso|devolu/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
@@ -360,7 +364,11 @@ function decodeText(buf){
 function extOf(n){var m=String(n).toLowerCase().match(/\.([a-z0-9]+)$/);return m?m[1]:"";}
 async function itemsFromBuffer(name,buf,password){
   var ext=extOf(name);
-  if(ext==="pdf")return buildItems(rowsFromLines(await pdfLines(buf,password)));
+  if(ext==="pdf"){
+    var lines=await pdfLines(buf,password),it=buildItems(rowsFromLines(lines));
+    lines.some(function(l){var m=l.match(/vencimento:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);if(m)it.due=m[3]+"-"+pad(m[2]);return !!m;});
+    return it;
+  }
   if(ext==="xls"||ext==="xlsx"||ext==="xlsm"){
     if(!window.XLSX)throw {msg:"Não consegui carregar o leitor de Excel. Recarregue a página."};
     var wb=XLSX.read(buf,{type:"array",cellDates:true}),best=[];
@@ -437,9 +445,10 @@ async function pdfLines(buf,password){
 }
 var MON={jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12};
 function rowsFromLines(lines){
-  var DATE="(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\s(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\.?)";
-  var AMT="(-\s?)?(?:R\$\s?)?(-\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})(\s?-)?";
-  var re=new RegExp(DATE+"\s+(.+?)\s+"+AMT+"(?=\s+"+DATE+"\s|\s*$)","gi");
+  var DATE=/(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|\d{1,2}\s(?:jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\.?)/.source;
+  var AMT=/(-\s?)?(?:R\$\s?)?(-\s?)?(\d{1,3}(?:\.\d{3})*,\d{2})(\s?-)?/.source;
+  /* O valor termina a compra quando vem antes de outra data ou do fim da linha (faturas em duas colunas). */
+  var re=new RegExp(DATE+/\s+(.+?)\s+/.source+AMT+"(?=\\s+"+DATE+"\\s|\\s*$|\\s+[A-Za-zÀ-ú])","gi");
   var rows=[["date","title","amount"]];
   lines.forEach(function(line){
     var m;re.lastIndex=0;
@@ -837,12 +846,13 @@ async function handleFile(file,password){
   toast("Lendo o arquivo…");
   try{
     var parts=extOf(file.name)==="zip"?await unzipAll(file,password):[{name:file.name,buf:new Uint8Array(await file.arrayBuffer())}];
-    var items=[];
-    for(var n=0;n<parts.length;n++)items=items.concat(await itemsFromBuffer(parts[n].name,parts[n].buf,password));
+    var items=[],due=null;
+    for(var n=0;n<parts.length;n++){var got=await itemsFromBuffer(parts[n].name,parts[n].buf,password);if(got.due)due=got.due;items=items.concat(got);}
     if(!items.length)throw {msg:"Não encontrei compras nesse arquivo. Confira se é a fatura do cartão."};
     var names=parts.map(function(x){return x.name}).join(", "),all=names+" "+file.name;
     S.askPass=null;
-    S.pending={file:names===file.name?file.name:file.name+" → "+names,items:items,month:guessMonth(all,items),card:guessCard(all)};
+    S.pending={file:names===file.name?file.name:file.name+" → "+names,items:items,month:due||guessMonth(all,items),card:guessCard(all)};
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(S.pending.month))S.pending.month=mid(nowIdx());
     toast("");render();
   }catch(e){
     if(e&&e.code==="password"){toast("");S.askPass={file:file,wrong:!!e.wrong};render();var pi=$("#pw");if(pi)pi.focus();return;}
