@@ -31,6 +31,18 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Cartões**: abas no topo separam Nubank, Itaú, C6 e Banco do Brasil (e outros cartões que estiverem na planilha), com o total do mês de cada um.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
 
+## Recebidos
+
+A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como linha com valor positivo na aba `Lancamentos`. "Repete todo mês" projeta o recebimento nos meses seguintes até haver um lançamento com o mesmo nome.
+
+## Gastos x Recebidos
+
+Resumo do mês (recebido, gasto, saldo e quanto sobrou) e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, a média do Cartão Gabi e as parcelas dos empréstimos.
+
+## Cartão Gabi
+
+Nos meses sem fatura importada do `Cartão Gabi`, o app usa uma média mensal (R$ 1.000 por padrão, editável na aba do cartão). A média fica salva no navegador.
+
 ## Empréstimos
 
 A aba **Empréstimos** controla o que você pegou: valor, credor, valor e número de parcelas e mês da primeira. Marque cada parcela como paga; o app mostra quanto falta pagar e as parcelas de cada mês.
