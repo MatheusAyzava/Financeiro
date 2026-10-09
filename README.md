@@ -30,6 +30,7 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Dono de cada compra**: Matheus é fixo; as outras pessoas vêm da coluna `Quem usou`. O app sugere o dono pelas compras anteriores com o mesmo nome.
 - **Cartões**: abas no topo separam Nubank, Itaú, C6 e Banco do Brasil (e outros cartões que estiverem na planilha), com o total do mês de cada um.
 - **Pagamento da fatura**: com um cartão selecionado, "Registrar pagamento da fatura" grava valor, data e conta (linha com Valor 0 e `[fatura-paga]`, para não contar o gasto duas vezes). Pode ser parcial: o app mostra quanto falta e a fatura só fica paga quando a soma dos pagamentos cobre o total. Em "Todos" aparece quantas faturas do mês estão pagas e quanto falta.
+- **Renomear**: o botão "renomear" em cada compra muda o nome na planilha e guarda o nome da fatura em `[nome-original=...]`, para reimportar sem duplicar. Com "Usar esse nome nas próximas faturas", as compras com o mesmo nome original já entram renomeadas.
 - **Valor pendente do mês anterior (rotativo)**: entra na fatura com categoria "Rotativo" e `[pendente-anterior]`; não entra em Gastos x Recebidos, porque já foi gasto no mês anterior.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
 

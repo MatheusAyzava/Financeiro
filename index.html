@@ -105,6 +105,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .empty.sm{padding:12px 0;text-align:left;font-size:13px;border-top:1px solid var(--line)}
 .tag.late{background:rgba(240,107,170,.18);color:var(--exp)}
 .paidbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.dlg label.chk{flex-direction:row;align-items:center;gap:8px;font-weight:500;color:var(--ink)}
+.dlg label.chk input{width:auto;accent-color:var(--accent)}
 .pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -780,11 +782,26 @@ function removePerson(n){S.extra=S.extra.filter(function(p){return p!==n});refre
 function rowCount(p){return S.rows.filter(function(r){return r.amount<0&&r.person===p}).length;}
 
 /* ---------- importação ---------- */
-function rowSig(r){var F=firstMonth(r);return normKey(r.name)+"|"+instValue(r).toFixed(2)+"|"+r.parcelas+"|"+F+(r.parcelas>1?"":"|"+r.date);}
+/* Compra renomeada guarda o nome que veio da fatura em [nome-original=...], para reimportar sem duplicar.
+   Com [lembrar-nome], as próximas faturas já entram com o nome novo. */
+function origName(r){var m=r.notes.match(/\[nome-original=([^\]]*)\]/);return m?m[1]:r.name;}
+function rowSig(r){var F=firstMonth(r);return normKey(origName(r))+"|"+instValue(r).toFixed(2)+"|"+r.parcelas+"|"+F+(r.parcelas>1?"":"|"+r.date);}
 function lastByKey(){
   var m={};
-  S.rows.forEach(function(r){if(r.amount>=0||!r.name)return;var k=normKey(r.name),F=firstMonth(r)||0;if(!m[k]||m[k].F<=F)m[k]={F:F,r:r};});
+  S.rows.forEach(function(r){if(r.amount>=0||!r.name)return;var k=normKey(origName(r)),F=firstMonth(r)||0;if(!m[k]||m[k].F<=F)m[k]={F:F,r:r};});
   return m;
+}
+function renameRows(rows,name,remember){
+  changeRows(rows,function(r){
+    var o=origName(r);
+    r.notes=r.notes.replace(/\s*\[nome-original=[^\]]*\]/g,"").replace(/\s*\[lembrar-nome\]/g,"").trim();
+    r.name=name;
+    if(normKey(o)!==normKey(name))r.notes=(r.notes+" [nome-original="+o.replace(/[\[\]]/g,"")+"]"+(remember?" [lembrar-nome]":"")).trim();
+  });
+}
+function renameFormHTML(){
+  var g=S.ren,rows=groupRows(g.gid),orig=rows.length?origName(rows[0]):g.name;
+  return '<div class="ov"><form class="dlg" id="renf" role="dialog" aria-modal="true" aria-label="Renomear"><h3>Renomear compra</h3>'+(normKey(orig)!==normKey(g.name)?'<div class="sub">Nome na fatura: '+esc(orig)+'</div>':'')+'<label>Novo nome<input id="rn-name" required maxlength="80" value="'+esc(g.name)+'"></label><label class="chk"><input type="checkbox" id="rn-mem" checked> Usar esse nome nas próximas faturas</label><div class="sub">'+(rows.length>1?'Vale para as '+rows.length+' compras deste grupo. ':'')+'A planilha guarda o nome original, então reimportar a fatura não duplica.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
 }
 function planImport(p,card){
   var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0;
@@ -795,7 +812,8 @@ function planImport(p,card){
     var s=x.key+"|"+x.amount.toFixed(2)+"|"+parc+"|"+F+(parc>1?"":"|"+x.date);
     if(have[s]){have[s]--;dup++;return;}
     var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r),carry=/valor pendente|saldo pendente|saldo anterior|rotativo/i.test(x.name);
-    add.push({date:x.date||mid(month)+"-01",name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")});
+    var alias=prev&&prev.r.notes.indexOf("[lembrar-nome]")>-1&&normKey(prev.r.name)!==x.key?" [nome-original="+x.name.replace(/[\[\]]/g,"")+"] [lembrar-nome]":"";
+    add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+alias});
   });
   return {add:add,dup:dup};
 }
@@ -905,6 +923,7 @@ function listHTML(rm){
     if(G.total)meta+='<span class="tag">parcela '+G.cur+'/'+G.total+(G.total>G.cur?' · faltam '+(G.total-G.cur):' · última')+'</span>';
     else meta+='<button class="tag btnlike'+(G.kind==="recorrente"?' on':'')+'" data-act="kind" data-g="'+esc(G.id)+'" title="Marque se repete todo mês">'+(G.kind==="recorrente"?'Repete todo mês':'Só neste mês')+'</button>';
     if(G.items.length>1)meta+='<span class="tag">×'+G.items.length+'</span>';
+    meta+='<button class="tag btnlike" data-act="ren" data-g="'+esc(G.id)+'" title="Renomear esta compra">renomear</button>';
     if(S.card==="all"&&G.card)meta+='<span class="tag">'+esc(G.card)+'</span>';
     if(G.proj)meta+='<span class="tag">previsto</span>';
     var open=S.open[G.id];
@@ -984,6 +1003,7 @@ function modalHTML(){
     var defCard=S.card==="all"?"Nubank":S.card;
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
+  if(S.ren)return renameFormHTML();
   if(S.invPay)return invoicePayFormHTML();
   if(S.askPass){
     return '<div class="ov"><form class="dlg" id="pwf" role="dialog" aria-modal="true" aria-label="Senha do arquivo"><h3>Arquivo protegido por senha</h3><div class="sub">'+esc(S.askPass.name)+'</div><label>Senha<input id="pw" type="password" autocomplete="off" required placeholder="Geralmente os números do CPF"></label>'+(S.askPass.wrong?'<div class="warnbox">Senha incorreta. Tente de novo.</div>':"")+'<div class="sub">A senha é usada só para abrir o arquivo neste navegador; não é salva nem enviada.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Abrir</button></div></form></div>';
@@ -1120,7 +1140,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1489,6 +1509,7 @@ document.addEventListener("click",function(ev){
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="fatura"?location.pathname:"#"+d.t)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
   if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="ren"){var rg=groupRows(d.g);if(!rg.length)return;S.ren={gid:d.g,name:rg[0].name};render();var rn=$("#rn-name");if(rn){rn.focus();rn.select();}return;}
   if(a==="invpay"){var ti=0;entriesFor(S.sel).forEach(function(e){ti+=e.amount});S.invPay={card:S.card,month:S.sel,total:r2(ti)};render();var ia=$("#iv-amt");if(ia){ia.focus();ia.select();}return;}
   if(a==="invunpay"){if(el.dataset.sure){var ip=S.rows.find(function(x){return x.id===d.id});if(ip&&commit([ip],[]))toast("Pagamento desfeito.");render();return;}el.dataset.sure="1";el.textContent="confirmar";return;}
   if(a==="hform"){H.form={tpl:null};render();var hn=$("#h-name");if(hn)hn.focus();return;}
@@ -1549,6 +1570,7 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
+  if(id==="renf"){ev.preventDefault();var nn=$("#rn-name").value.replace(/\s+/g," ").trim();if(!nn){toast("Escreva um nome.");return;}var rr=groupRows(S.ren.gid);if(rr.length)renameRows(rr,nn,$("#rn-mem").checked);S.ren=null;toast("Compra renomeada.");render();return;}
   if(id==="invf"){ev.preventDefault();submitInvoicePay();return;}
   if(id==="hf"){ev.preventDefault();submitHouse();return;}
   if(id==="hpf"){ev.preventDefault();submitHousePay();return;}
@@ -1560,7 +1582,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
