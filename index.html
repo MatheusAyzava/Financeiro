@@ -54,6 +54,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .nav button:disabled{opacity:.35;cursor:default}
 .mtitle{font-family:var(--display);font-weight:700;font-size:22px;margin:0 6px;letter-spacing:-.01em}
 .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--tile);color:var(--muted);width:max-content;max-width:100%}
+.pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
+.btn:disabled{opacity:.5;cursor:default}
 .pill.real{background:var(--tile);color:var(--ink)}
 .big{font-family:var(--display);font-weight:700;font-size:clamp(42px,7vw,64px);line-height:1;letter-spacing:-.02em;margin-top:10px;overflow-wrap:anywhere}
 .sub{color:var(--muted);font-size:13px}
@@ -191,12 +194,10 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
       <button class="btn" id="btnX" data-act="xlsx" hidden>Baixar tudo</button>
       <button class="btn primary" data-act="pick">Importar fatura</button>
       <input type="file" id="file" accept=".csv,text/csv,text/plain" hidden>
-      <input type="file" id="bkfile" accept=".json,application/json" hidden>
     </div>
   </header>
   <main id="main" class="app" style="gap:16px"></main>
   <p class="foot-note" id="note"></p>
-  <div class="backup"><button class="btn sm text" data-act="bkout">Baixar backup</button><button class="btn sm text" data-act="bkin">Restaurar backup</button></div>
 </div>
 <div id="modal"></div>
 <div id="toast" role="status"></div>
@@ -207,6 +208,9 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
 <script>
 (function(){
 "use strict";
+/* Banco de dados: aba "Lancamentos" da planilha Google, uma linha por compra, no formato
+   Data | Descricao | Categoria | Conta | Valor | Quem usou | Cartao | Status | Parcelas | Observacao.
+   Parcelas futuras e meses de previsão são calculados a partir dessas linhas. */
 var BASE=["Matheus"];
 var MESES=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
 var MS=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
@@ -220,16 +224,19 @@ var mid=function(i){return Math.floor(i/12)+"-"+String(i%12+1).padStart(2,"0")};
 var mname=function(i){var n=MESES[i%12];return n.charAt(0).toUpperCase()+n.slice(1)+" de "+Math.floor(i/12)};
 var mshort=function(i){return MS[i%12]+"/"+String(Math.floor(i/12)).slice(2)};
 var r2=function(x){return Math.round(x*100)/100};
-var clone=function(o){return JSON.parse(JSON.stringify(o))};
 var has=function(o,k){return Object.prototype.hasOwnProperty.call(o,k)};
-var DEFAULT_START=idx(2026,10), DEFAULT_END=idx(2027,12);
+var pad=function(n){return String(n).padStart(2,"0")};
+var todayISO=function(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())};
+var nowIdx=function(){var d=new Date();return idx(d.getFullYear(),d.getMonth()+1)};
+var LOCAL_KEY="fatura-matheus-v2";
 
-var S={bills:{},rules:{},people:BASE.slice(),sel:null,filter:"all",view:"chart",open:{},showIgn:false,ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:0};
+var S={rows:[],extra:[],people:BASE.slice(),card:"all",sel:null,filter:"all",view:"chart",open:{},ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:null,busy:0};
 var isP=function(o){return S.people.indexOf(o)>-1};
 var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":"c"+((n%8)+1)};
 function groups(t){return S.people.map(function(p){return {n:p,c:cls(p),v:t.by[p]||0}});}
+var seq=0;function newId(){return "n"+(++seq)+"_"+Date.now()}
 
-/* ---------- parsing ---------- */
+/* ---------- CSV da fatura ---------- */
 function parseCSV(text){
   text=text.replace(/^﻿/,"");
   var first=text.split(/\r?\n/)[0]||"";
@@ -253,7 +260,7 @@ function parseAmount(s){
   var n=parseFloat(s); return isNaN(n)?NaN:(neg?-n:n);
 }
 function normKey(name){
-  return name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/\s*\*\s*/g,"*").replace(/\s+/g," ").trim();
+  return String(name).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/\s*\*\s*/g,"*").replace(/\s+/g," ").trim();
 }
 function parseTitle(t){
   var name=t.trim(),cur=null,total=null;
@@ -267,14 +274,15 @@ function buildItems(rows){
   var di=head.findIndex(function(x){return /^(date|data)/.test(x)});
   var ti=head.findIndex(function(x){return /^(title|descri|estabelec|lan)/.test(x)});
   var ai=head.findIndex(function(x){return /^(amount|valor)/.test(x)});
+  var ci=head.findIndex(function(x){return /^(category|categ)/.test(x)});
   var body;
-  if(di>=0&&ti>=0&&ai>=0) body=rows.slice(1); else {di=0;ti=1;ai=2;body=rows;}
+  if(di>=0&&ti>=0&&ai>=0) body=rows.slice(1); else {di=0;ti=1;ai=2;ci=-1;body=rows;}
   var items=[];
-  body.forEach(function(r,n){
+  body.forEach(function(r){
     if(r.length<=Math.max(di,ti,ai))return;
     var amt=parseAmount(r[ai]); if(isNaN(amt))return;
     var p=parseTitle(r[ti]);
-    items.push({id:"i"+n,date:(r[di]||"").trim(),name:p.name,key:normKey(p.name),amount:r2(amt),cur:p.cur,total:p.total,kind:p.cur?"parcelado":"avulso",owner:"",ignored:false,reason:""});
+    items.push({date:normDate(r[di]),name:p.name,key:normKey(p.name),amount:r2(amt),cur:p.cur,total:p.total,category:ci>=0?(r[ci]||"").trim():"",ignored:false,reason:""});
   });
   var pool=[];
   items.forEach(function(i){
@@ -291,41 +299,58 @@ function buildItems(rows){
 }
 function guessMonth(name,items){
   var m=(name||"").match(/(\d{4})-(\d{2})-(\d{2})/);
-  if(m) return {month:m[1]+"-"+m[2],due:m[0]};
+  if(m) return m[1]+"-"+m[2];
   var latest=items.map(function(i){return i.date}).filter(Boolean).sort().pop();
-  if(latest) return {month:latest.slice(0,7),due:null};
-  return {month:mid(DEFAULT_START),due:null};
+  return latest?latest.slice(0,7):mid(nowIdx());
 }
 
-/* ---------- model ---------- */
-function applyRules(items,oldItems){
-  var old={};
-  (oldItems||[]).forEach(function(o){ if(o.owner&&!old[o.key])old[o.key]=o.owner; });
-  items.forEach(function(i){
-    var r=S.rules[i.key]||{};
-    i.owner=r.owner||old[i.key]||"";
-    if(!i.cur && (r.kind==="recorrente"||r.kind==="avulso")) i.kind=r.kind;
-  });
+/* ---------- linhas da planilha ---------- */
+function normDate(v){
+  if(v==null||v==="")return "";
+  if(typeof v==="number")return new Date(Math.round((v-25569)*86400000)).toISOString().slice(0,10);
+  var s=String(v).trim(),m;
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  if((m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)))return m[3]+"-"+pad(m[2])+"-"+pad(m[1]);
+  var d=new Date(s);
+  if(!isNaN(d))return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+  return s.slice(0,10);
 }
-function entriesFor(i){
-  var key=mid(i),b=S.bills[key],out=[];
-  var push=function(x,src,proj,cur){var e=Object.assign({},x);e.projected=proj;e.src=src;if(cur)e.cur=cur;out.push(e);};
-  if(b&&b.imported){b.items.forEach(function(x){if(!x.ignored)push(x,key,false)});return out;}
-  if(b)b.items.forEach(function(x){if(!x.ignored)push(x,key,false)});
-  var months=Object.keys(S.bills).map(pm).filter(function(j){return j<i}).sort(function(a,c){return a-c});
-  var series={},lastJ=null;
-  months.forEach(function(j){
-    var bj=S.bills[mid(j)];
-    bj.items.forEach(function(x){
-      if(x.ignored||x.kind!=="parcelado"||!x.cur||!x.total)return;
-      var n=i-j; if(x.cur+n<=x.total) series[x.key+"|"+x.total+"|"+(j-(x.cur-1))]={x:x,src:mid(j),cur:x.cur+n};
-    });
-    if(bj.items.length)lastJ=j;
+function num(v){if(typeof v==="number")return v;var n=parseAmount(v);return isNaN(n)?0:n;}
+function rowFromSheet(a,sheetRow){
+  return {id:"r"+sheetRow,sheetRow:sheetRow,date:normDate(a[0]),name:String(a[1]==null?"":a[1]).trim(),category:String(a[2]||"").trim(),account:String(a[3]||"").trim(),amount:r2(num(a[4])),person:String(a[5]||"").trim(),card:String(a[6]||"").trim(),status:String(a[7]||"").trim(),parcelas:Math.max(parseInt(a[8],10)||1,1),notes:String(a[9]||"").trim()};
+}
+function toArray(r){return [r.date,r.name,r.category,r.account,r.amount,r.person,r.card,r.status,r.parcelas,r.notes];}
+function sig(r){return [r.date,r.name,r.amount.toFixed(2),r.person,r.card,r.parcelas,r.notes].join("|");}
+function firstMonth(r){
+  var m=r.notes.match(/\[primeira-parcela=(\d{4}-\d{2})\]/);
+  if(m)return pm(m[1]);
+  var d=r.date.match(/^(\d{4})-(\d{2})/);if(!d)return null;
+  var i=idx(+d[1],+d[2]);return r.parcelas>1?i+1:i;
+}
+function instValue(r){var v=Math.abs(r.amount);return /\[valor-total\]/.test(r.notes)&&r.parcelas>1?r2(v/r.parcelas):v;}
+function isRec(r){return /\[recorrente\]/.test(r.notes);}
+function setMarker(notes,marker,on){notes=notes.split(marker).join("").replace(/\s+/g," ").trim();return on?(notes+" "+marker).trim():notes;}
+function expenses(){return S.rows.filter(function(r){return r.amount<0&&r.name&&(S.card==="all"||r.card===S.card)&&firstMonth(r)!=null});}
+function cards(){var c={Nubank:1};S.rows.forEach(function(r){if(r.card)c[r.card]=1});return Object.keys(c).sort();}
+
+/* ---------- modelo ---------- */
+function realMonths(){var s={};expenses().forEach(function(r){if(r.parcelas<=1)s[firstMonth(r)]=1});return s;}
+function gidOf(e){return e.key+"|"+(e.total||1)+"|"+(e.total?e.F:"")+"|"+e.kind;}
+function entriesFor(i,real){
+  if(!real)real=realMonths();
+  var isReal=!!real[i],out=[],latestRec={};
+  var push=function(r,F,o){out.push({id:r.id,row:r,F:F,name:r.name,key:normKey(r.name),amount:instValue(r),cur:o.cur||null,total:o.total||null,kind:o.kind,owner:r.person,date:r.date,projected:!isReal||!!o.proj});};
+  expenses().forEach(function(r){
+    var F=firstMonth(r);
+    if(r.parcelas>1){var k=i-F+1;if(k>=1&&k<=r.parcelas)push(r,F,{cur:k,total:r.parcelas,kind:"parcelado"});return;}
+    if(isRec(r)){
+      if(i===F)push(r,F,{kind:"recorrente"});
+      else if(i>F&&!isReal){var k2=normKey(r.name);if(!latestRec[k2]||latestRec[k2].F<F)latestRec[k2]={r:r,F:F};}
+      return;
+    }
+    if(i===F)push(r,F,{kind:"avulso"});
   });
-  Object.keys(series).forEach(function(k){push(series[k].x,series[k].src,true,series[k].cur)});
-  if(lastJ!==null){
-    S.bills[mid(lastJ)].items.forEach(function(x){ if(!x.ignored&&x.kind==="recorrente")push(x,mid(lastJ),true); });
-  }
+  Object.keys(latestRec).forEach(function(k){push(latestRec[k].r,latestRec[k].F,{kind:"recorrente",proj:true})});
   return out;
 }
 function totals(es){
@@ -337,28 +362,24 @@ function totals(es){
   return t;
 }
 function range(){
-  var bi=Object.keys(S.bills).map(pm),start=Math.min.apply(null,bi.concat([DEFAULT_START])),end=DEFAULT_END;
-  Object.keys(S.bills).forEach(function(k){var j=pm(k);end=Math.max(end,j);S.bills[k].items.forEach(function(x){if(!x.ignored&&x.kind==="parcelado"&&x.total)end=Math.max(end,j+x.total-x.cur)})});
-  end=Math.min(end,start+40);
+  var now=nowIdx(),start=now,end=now+3;
+  expenses().forEach(function(r){var F=firstMonth(r);start=Math.min(start,F);end=Math.max(end,F+r.parcelas-1);});
+  start=Math.max(start,now-24);end=Math.min(end,start+60);
   var a=[];for(var i=start;i<=end;i++)a.push(i);return a;
 }
-function syncPeople(){
-  var add=[];
-  Object.keys(S.bills).forEach(function(m){S.bills[m].items.forEach(function(x){if(x.owner&&!isP(x.owner)&&add.indexOf(x.owner)<0)add.push(x.owner)})});
-  Object.keys(S.rules).forEach(function(k){var o=S.rules[k].owner;if(o&&!isP(o)&&add.indexOf(o)<0)add.push(o)});
-  if(add.length){S.people=S.people.concat(add);persist(null,false,true);}
+function refreshPeople(){
+  var list=BASE.slice(),low=list.map(function(p){return p.toLowerCase()});
+  var add=function(p){p=String(p||"").trim();if(p&&low.indexOf(p.toLowerCase())<0){list.push(p);low.push(p.toLowerCase());}};
+  S.rows.forEach(function(r){if(r.amount<0)add(r.person)});
+  S.extra.forEach(add);
+  S.people=list;
 }
 
-/* ---------- persistence ---------- */
-/* Cópia local no navegador + sincronização com a planilha Google (aba "Faturas")
-   pelo Apps Script da planilha. Cada linha da aba guarda uma chave
-   ("bill:2026-10", "rules" ou "people") e o JSON correspondente. */
-var dirty={},rulesDirty=false,peopleDirty=false,timer=null,chain=Promise.resolve(),scriptUrl="",syncState="local";
-function saveLocal(){try{localStorage.setItem("fatura-matheus-v1",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)}))}catch(e){}}
-function loadLocal(){try{var d=JSON.parse(localStorage.getItem("fatura-matheus-v1")||"null");if(d){S.bills=d.bills||{};S.rules=d.rules||{};S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));}}catch(e){}}
-function getScriptUrl(){
-  return String(window.FATURA_SCRIPT_URL||"").trim();
-}
+/* ---------- planilha ---------- */
+var scriptUrl="",syncState="local",chain=Promise.resolve();
+function saveLocal(){try{localStorage.setItem(LOCAL_KEY,JSON.stringify({rows:S.mode==="local"?S.rows:[],cache:S.mode!=="local"?S.rows:[],extra:S.extra,card:S.card}))}catch(e){}}
+function loadLocal(){try{var d=JSON.parse(localStorage.getItem(LOCAL_KEY)||"null");if(d){S.rows=(S.mode==="local"?d.rows:d.cache)||[];S.extra=d.extra||[];S.card=d.card||"all";}}catch(e){}}
+function getScriptUrl(){return String(window.FATURA_SCRIPT_URL||"").trim();}
 function jsonp(url,params,ms){
   return new Promise(function(resolve,reject){
     var cb="faturaCb"+Date.now()+Math.random().toString(36).slice(2),u=new URL(url),s=document.createElement("script"),t;
@@ -367,200 +388,171 @@ function jsonp(url,params,ms){
     var done=function(){clearTimeout(t);delete window[cb];s.remove();};
     window[cb]=function(data){done();resolve(data)};
     s.onerror=function(){done();reject(new Error("falha"))};
-    t=setTimeout(function(){done();reject(new Error("tempo"))},ms||10000);
+    t=setTimeout(function(){done();reject(new Error("tempo"))},ms||15000);
     s.src=u.toString();document.body.appendChild(s);
   });
 }
 async function postSheet(payload){
   await fetch(scriptUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:new URLSearchParams({payload:JSON.stringify(payload)})});
 }
-function saveKey(key,value){return postSheet({action:"saveFatura",key:key,json:value==null?"":JSON.stringify(value)});}
-async function fetchSheet(){
-  var d=await jsonp(scriptUrl,{action:"listFatura"});
-  if(!d||!Array.isArray(d.rows))throw new Error("formato");
-  var out={bills:{},rules:{},people:[],count:0};
-  d.rows.forEach(function(r){
-    var k=String(r[0]||""),v;try{v=JSON.parse(r[1]||"null")}catch(e){return}
-    if(v==null)return;out.count++;
-    if(k.indexOf("bill:")===0)out.bills[k.slice(5)]=v;
-    else if(k==="rules")out.rules=v;
-    else if(k==="people")out.people=v;
-  });
+async function fetchRows(){
+  var d=await jsonp(scriptUrl,{action:"listTransactions"});
+  if(!d||!Array.isArray(d.values))throw new Error("formato");
+  var out=[];
+  d.values.forEach(function(a,n){if(n===0||!a||!a.some(function(x){return x!==""&&x!=null}))return;out.push(rowFromSheet(a,n+1));});
   return out;
 }
-function applySheet(d){
-  S.bills=d.bills;S.rules=d.rules;
-  S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));
-  saveLocal();
+async function reload(){
+  if(S.mode!=="sheet"||S.busy)return;
+  try{var rows=await fetchRows();if(S.busy)return;S.rows=rows;saveLocal();refreshPeople();render();}catch(e){}
 }
-function markAllDirty(){Object.keys(S.bills).forEach(function(m){dirty[m]=1});rulesDirty=true;peopleDirty=true;}
-function persist(month,rules,people){
-  if(month)dirty[month]=1; if(rules)rulesDirty=true; if(people)peopleDirty=true;
-  saveLocal();
-  if(S.mode!=="sheet"){dirty={};rulesDirty=false;peopleDirty=false;return;}
-  clearTimeout(timer);timer=setTimeout(function(){chain=chain.then(flush)},600);
+/* Troca linhas: apaga as antigas e grava as novas. Usa só as ações que o Apps Script já tem
+   (deleteTransaction e appendTransactions). As linhas a apagar são localizadas de novo na
+   planilha pelo conteúdo, para não apagar a linha errada se a planilha mudou. */
+function commit(remove,add){
+  if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return false;}
+  var rm={};remove.forEach(function(r){rm[r.id]=1});
+  var oldRows=remove.map(function(r){return Object.assign({},r)}),newRows=add.map(toArray);
+  S.rows=S.rows.filter(function(r){return !rm[r.id]}).concat(add.map(function(r){r.id=newId();r.sheetRow=null;return r;}));
+  refreshPeople();saveLocal();
+  if(S.mode!=="sheet")return true;
+  S.busy++;note();
+  chain=chain.then(async function(){
+    if(oldRows.length){
+      var fresh=await fetchRows(),used={},targets=[];
+      oldRows.forEach(function(r){var s=sig(r),f=fresh.find(function(x){return !used[x.sheetRow]&&sig(x)===s});if(f){used[f.sheetRow]=1;targets.push(f);}});
+      targets.sort(function(a,b){return b.sheetRow-a.sheetRow});
+      for(var n=0;n<targets.length;n++)await postSheet({action:"deleteTransaction",sheetRow:targets[n].sheetRow,transaction:toArray(targets[n])});
+    }
+    if(newRows.length)await postSheet({action:"appendTransactions",transactions:newRows});
+  }).catch(function(){toast("Não foi possível gravar na planilha. Confira a conexão e tente de novo.");}).then(function(){
+    S.busy--;note();if(!S.busy)reload();
+  });
+  return true;
 }
-function hasPending(){return Object.keys(dirty).length>0||rulesDirty||peopleDirty;}
-async function flush(){
-  var ms=Object.keys(dirty),rd=rulesDirty,pd=peopleDirty;dirty={};rulesDirty=false;peopleDirty=false;
-  try{
-    for(var n=0;n<ms.length;n++)await saveKey("bill:"+ms[n],S.bills[ms[n]]||null);
-    if(rd)await saveKey("rules",S.rules);
-    if(pd)await saveKey("people",S.people.slice(BASE.length));
-  }catch(e){
-    ms.forEach(function(m){dirty[m]=1});if(rd)rulesDirty=true;if(pd)peopleDirty=true;
-    toast("Não foi possível salvar na planilha agora. Tentando de novo…");
-    clearTimeout(timer);timer=setTimeout(function(){chain=chain.then(flush)},5000);
-  }
+function changeRows(rows,fn){
+  var add=rows.map(function(r){var c=Object.assign({},r);fn(c);return c;});
+  return commit(rows,add);
 }
-async function refreshFromSheet(){
-  if(S.mode!=="sheet"||hasPending()||S.pending||S.form||S.newp||S.text)return;
-  try{var d=await fetchSheet();if(hasPending())return;applySheet(d);syncPeople();if(S.sel==null||range().indexOf(S.sel)<0)S.sel=defaultSel();render();}catch(e){}
+function afterLoad(){
+  S.ready=true;var all=range();
+  if(S.sel==null||all.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),all[0]),all[all.length-1]);
+  render();
 }
-function defaultSel(){
-  var ks=Object.keys(S.bills).filter(function(k){return S.bills[k].imported}).map(pm).sort(function(a,b){return b-a});
-  return ks.length?ks[0]:DEFAULT_START;
-}
-function afterLoad(){S.ready=true;syncPeople();if(S.sel==null)S.sel=defaultSel();render();}
 async function init(){
   S.canDl=!!window.XLSX; $("#btnX").hidden=!S.canDl;
-  S.mode="local";loadLocal();
   scriptUrl=getScriptUrl();
+  S.mode=scriptUrl?"sheet":"local";
+  loadLocal();refreshPeople();
   if(!scriptUrl){syncState="local";note();afterLoad();return;}
   syncState="loading";note();
-  if(Object.keys(S.bills).length)afterLoad();else render();
-  try{
-    var d=await fetchSheet();
-    S.mode="sheet";syncState="sheet";
-    if(!d.count&&Object.keys(S.bills).length){markAllDirty();chain=chain.then(flush);}
-    else applySheet(d);
-    S.sel=null;
-  }catch(e){syncState="old";}
-  note();afterLoad();
+  if(S.rows.length)afterLoad();else render();
+  try{S.rows=await fetchRows();syncState="sheet";saveLocal();}
+  catch(e){S.mode="offline";syncState="offline";}
+  refreshPeople();note();afterLoad();
 }
 function note(){
-  var t={
-    local:"Salvo neste navegador.",
+  var t=S.busy?"Gravando na planilha Google…":{
+    local:"Planilha Google não configurada: salvo só neste navegador.",
     loading:"Carregando da planilha Google…",
-    sheet:"Sincronizado com a planilha Google (aba Faturas).",
-    old:"Salvo neste navegador. A planilha Google entra quando o Apps Script for atualizado."
+    sheet:"Tudo registrado na planilha Google (aba Lancamentos).",
+    offline:"Não consegui abrir a planilha agora. Mostrando a última cópia deste navegador; recarregue para tentar de novo."
   }[syncState];
   $("#note").textContent=t;
 }
-document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")refreshFromSheet();});
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible"&&!S.pending&&!S.form&&!S.newp&&!S.text)reload();});
 function saveFile(filename,data,type){
   var blob=new Blob([data],{type:type||"application/octet-stream"}),url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000);
 }
-function exportBackup(){
-  saveFile("fatura-backup-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)},null,2),"application/json");
-  toast("Backup baixado.");
-}
-async function importBackup(file){
-  if(!file)return;
-  try{
-    var d=JSON.parse(await file.text());
-    if(!d||typeof d.bills!=="object")throw new Error("formato");
-    S.bills=d.bills||{};S.rules=d.rules||{};
-    S.people=BASE.concat((d.people||d.list||[]).filter(function(p){return BASE.indexOf(p)<0}));
-    markAllDirty();persist(null,false,false);
-    syncPeople();S.sel=defaultSel();S.filter="all";render();
-    toast(S.mode==="sheet"?"Backup restaurado e enviado para a planilha.":"Backup restaurado.");
-  }catch(e){toast("Esse arquivo não é um backup válido.");}
-}
 
-/* ---------- actions ---------- */
-function setOwner(key,src,p){
-  var b=S.bills[src];if(!b)return;
-  var cur=null;b.items.forEach(function(x){if(x.key===key)cur=x.owner});
-  var next=(cur===p)?"":p;
-  b.items.forEach(function(x){if(x.key===key)x.owner=next});
-  S.rules[key]=Object.assign({},S.rules[key],{owner:next});
-  persist(src,true);
+/* ---------- ações ---------- */
+function groupRows(gid){
+  var seen={},out=[];
+  entriesFor(S.sel).forEach(function(e){if(gidOf(e)===gid&&!seen[e.id]){seen[e.id]=1;out.push(e.row)}});
+  return out;
 }
-function setKind(key,src){
-  var b=S.bills[src];if(!b)return;
-  var first=b.items.find(function(x){return x.key===key&&!x.cur});if(!first)return;
-  var next=first.kind==="recorrente"?"avulso":"recorrente";
-  b.items.forEach(function(x){if(x.key===key&&!x.cur)x.kind=next});
-  S.rules[key]=Object.assign({},S.rules[key],{kind:next});
-  persist(src,true);
+function setOwner(gid,p){
+  var rows=groupRows(gid);if(!rows.length)return;
+  var next=rows.every(function(r){return r.person===p})?"":p;
+  changeRows(rows.filter(function(r){return r.person!==next}),function(r){r.person=next});
 }
-function toggleIgnore(src,id,val){
-  var b=S.bills[src];if(!b)return;
-  b.items.forEach(function(x){if(x.id===id){x.ignored=val;x.reason=val?"Ignorada por você":"";}});
-  persist(src,false);
+function setKind(gid){
+  var rows=groupRows(gid).filter(function(r){return r.parcelas<=1});if(!rows.length)return;
+  var on=!isRec(rows[0]);
+  changeRows(rows,function(r){r.notes=setMarker(r.notes,"[recorrente]",on)});
+}
+function deleteRow(id){
+  var r=S.rows.find(function(x){return x.id===id});if(!r)return;
+  if(commit([r],[]))toast("Compra excluída.");
 }
 function assignAllNone(p){
-  var es=entriesFor(S.sel),seen={};
-  es.forEach(function(e){
-    if(isP(e.owner))return;
-    var b=S.bills[e.src];if(!b)return;
-    b.items.forEach(function(x){if(x.key===e.key)x.owner=p});
-    S.rules[e.key]=Object.assign({},S.rules[e.key],{owner:p});
-    seen[e.src]=1;
-  });
-  Object.keys(seen).forEach(function(m){persist(m,true)});
-}
-function deleteBill(k){
-  delete S.bills[k];
-  persist(k,false);
-  S.sel=Object.keys(S.bills).length?defaultSel():DEFAULT_START;
+  var seen={},rows=[];
+  entriesFor(S.sel).forEach(function(e){if(!isP(e.owner)&&!seen[e.id]){seen[e.id]=1;rows.push(e.row)}});
+  changeRows(rows,function(r){r.person=p});
 }
 function cleanName(n){return String(n||"").replace(/\s+/g," ").trim().slice(0,24);}
-function nameTaken(n,except){return S.people.some(function(p){return p!==except&&p.toLowerCase()===n.toLowerCase()});}
 function addPerson(n){
   n=cleanName(n);if(!n){toast("Escreva um nome.");return null;}
-  if(nameTaken(n)){return S.people.find(function(p){return p.toLowerCase()===n.toLowerCase()});}
-  S.people.push(n);persist(null,false,true);return n;
+  var found=S.people.find(function(p){return p.toLowerCase()===n.toLowerCase()});
+  if(found)return found;
+  S.extra.push(n);refreshPeople();saveLocal();return n;
 }
-function renamePerson(oldN,newN){
-  newN=cleanName(newN);
-  if(!newN){toast("Escreva um nome.");return;}
-  if(newN===oldN)return;
-  if(nameTaken(newN,oldN)){toast("Já existe alguém com esse nome.");return;}
-  S.people[S.people.indexOf(oldN)]=newN;
-  Object.keys(S.bills).forEach(function(m){var ch=false;S.bills[m].items.forEach(function(x){if(x.owner===oldN){x.owner=newN;ch=true;}});if(ch)persist(m,false);});
-  Object.keys(S.rules).forEach(function(k){if(S.rules[k].owner===oldN)S.rules[k].owner=newN;});
-  persist(null,true,true);
+function removePerson(n){S.extra=S.extra.filter(function(p){return p!==n});refreshPeople();saveLocal();if(S.filter===n)S.filter="all";}
+function rowCount(p){return S.rows.filter(function(r){return r.amount<0&&r.person===p}).length;}
+
+/* ---------- importação ---------- */
+function rowSig(r){var F=firstMonth(r);return normKey(r.name)+"|"+instValue(r).toFixed(2)+"|"+r.parcelas+"|"+F+(r.parcelas>1?"":"|"+r.date);}
+function lastByKey(){
+  var m={};
+  S.rows.forEach(function(r){if(r.amount>=0||!r.name)return;var k=normKey(r.name),F=firstMonth(r)||0;if(!m[k]||m[k].F<=F)m[k]={F:F,r:r};});
+  return m;
 }
-function removePerson(n){
-  var i=S.people.indexOf(n);if(i<BASE.length)return;
-  S.people.splice(i,1);
-  Object.keys(S.bills).forEach(function(m){var ch=false;S.bills[m].items.forEach(function(x){if(x.owner===n){x.owner="";ch=true;}});if(ch)persist(m,false);});
-  Object.keys(S.rules).forEach(function(k){if(S.rules[k].owner===n)S.rules[k].owner="";});
-  if(S.filter===n)S.filter="all";
-  persist(null,true,true);
+function planImport(p,card){
+  var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0;
+  S.rows.forEach(function(r){if(r.amount<0&&r.card===card){var s=rowSig(r);have[s]=(have[s]||0)+1;}});
+  p.items.forEach(function(x){
+    if(x.ignored)return;
+    var F=x.cur?month-(x.cur-1):month,parc=x.total||1;
+    var s=x.key+"|"+x.amount.toFixed(2)+"|"+parc+"|"+F+(parc>1?"":"|"+x.date);
+    if(have[s]){have[s]--;dup++;return;}
+    var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r);
+    add.push({date:x.date||mid(month)+"-01",name:x.name,category:x.category||(prev&&prev.r.category)||"Sem categoria",account:card,amount:-x.amount,person:prev?prev.r.person:"",card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")});
+  });
+  return {add:add,dup:dup};
 }
 
-/* ---------- rendering ---------- */
-function ownerSeg(owner,key,src){
-  var b=S.people.map(function(p){return '<button class="o '+cls(p)+(owner===p?' on':'')+'" data-act="owner" data-key="'+esc(key)+'" data-src="'+src+'" data-p="'+esc(p)+'" aria-pressed="'+(owner===p)+'">'+esc(p)+'</button>'}).join("");
-  return '<span class="owners">'+b+'<button class="o more" data-act="newp" data-key="'+esc(key)+'" data-src="'+src+'" title="Escrever o nome de outra pessoa">Outro…</button></span>';
+/* ---------- tela ---------- */
+function ownerSeg(owner,gid){
+  var b=S.people.map(function(p){return '<button class="o '+cls(p)+(owner===p?' on':'')+'" data-act="owner" data-g="'+esc(gid)+'" data-p="'+esc(p)+'" aria-pressed="'+(owner===p)+'">'+esc(p)+'</button>'}).join("");
+  return '<span class="owners">'+b+'<button class="o more" data-act="newp" data-g="'+esc(gid)+'" title="Escrever o nome de outra pessoa">Outro…</button></span>';
 }
 function dateBR(s){var m=(s||"").match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[3]+"/"+m[2]:"";}
-function heroHTML(){
-  var i=S.sel,k=mid(i),b=S.bills[k],real=b&&b.imported,es=entriesFor(i),t=totals(es);
+function cardSelect(){
+  return '<select class="cardsel" id="cardsel" aria-label="Cartão"><option value="all"'+(S.card==="all"?' selected':'')+'>Todos os cartões</option>'+cards().map(function(c){return '<option'+(S.card===c?' selected':'')+'>'+esc(c)+'</option>'}).join("")+'</select>';
+}
+function heroHTML(rm){
+  var i=S.sel,es=entriesFor(i,rm),t=totals(es),real=!!rm[i];
   var all=range();
-  var status=real?'<span class="pill real">Fatura importada'+(b.due?' · vence '+dateBR(b.due):'')+'</span>':'<span class="pill">Previsão com base nas parcelas'+(b&&b.items.length?' + lançamentos seus':'')+'</span>';
-  var people=groups(t).map(function(g){
+  var status=real?'<span class="pill real">Fatura registrada</span>':'<span class="pill">Previsão com base nas parcelas</span>';
+  var people=groups(t).filter(function(g){return g.v>0||BASE.indexOf(g.n)>-1}).map(function(g){
     var v=g.v,pct=t.total?Math.round(v/t.total*100):0;
-    return '<div class="person '+g.c+'"'+(g.who&&g.who.length?' title="'+esc(g.who.join(", "))+'"':"")+'><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês'+(g.who&&g.who.length?' · '+esc(g.who.join(", ")):"")+'</div></div>';
+    return '<div class="person '+g.c+'"><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês</div></div>';
   }).join("");
   if(t.none>0)people+='<div class="person none"><div class="n">Sem dono</div><div class="v num">'+BRL.format(t.none)+'</div><div class="s">defina abaixo de quem é</div></div>';
-  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div>'+status+'<div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div></div></div><div class="people">'+people+'</div></section>';
+  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills">'+cardSelect()+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div></div></div><div class="people">'+people+'</div></section>';
 }
-function chartHTML(){
-  var all=range(),data=all.map(function(i){var es=entriesFor(i);return {i:i,t:totals(es),real:S.bills[mid(i)]&&S.bills[mid(i)].imported};});
+function chartHTML(rm){
+  var all=range(),data=all.map(function(i){return {i:i,t:totals(entriesFor(i,rm)),real:!!rm[i]};});
   var mx=Math.max.apply(null,data.map(function(d){return d.t.total}).concat([1]));
   var head='<div class="ch"><h2>Mês a mês</h2><div class="seg"><button class="'+(S.view==="chart"?'on':'')+'" data-act="view" data-v="chart">Gráfico</button><button class="'+(S.view==="table"?'on':'')+'" data-act="view" data-v="table">Tabela</button></div></div>';
   var body;
   if(S.view==="chart"){
     body='<div class="plot" id="plot">'+data.map(function(d){
       var parts=groups(d.t).concat([{n:"Sem dono",c:"c0",v:d.t.none}]);
-      var segs=parts.map(function(s){return s.v>0?'<i class="'+s.c+(d.real?'':' pr')+'" style="height:'+Math.max(2,s.v/mx*170)+'px" title="'+esc(s.n)+': '+BRL.format(s.v)+'"></i>':''}).join("");
+      var segs=parts.map(function(s){return s.v>0?'<i class="'+s.c+(d.real?'':' pr')+'" style="height:'+Math.max(2,s.v/mx*200)+'px" title="'+esc(s.n)+': '+BRL.format(s.v)+'"></i>':''}).join("");
       return '<button class="col'+(d.i===S.sel?' sel':'')+'" data-act="sel" data-i="'+d.i+'" aria-label="'+mname(d.i)+', '+BRL.format(d.t.total)+'"><span class="tot num">'+(d.t.total?N0.format(d.t.total):'–')+'</span><div class="stack">'+segs+'</div><span class="lbl">'+mshort(d.i)+'</span></button>';
-    }).join("")+'</div><div class="legend">'+groups(data[0].t).map(function(g){return '<span class="'+g.c+'"><i class="dot"></i>'+esc(g.n)+'</span>'}).join("")+'<span class="c0"><i class="dot"></i>Sem dono</span><span><i class="hatch"></i>Listrado = previsão</span></div>';
+    }).join("")+'</div><div class="legend">'+S.people.map(function(p){return '<span class="'+cls(p)+'"><i class="dot"></i>'+esc(p)+'</span>'}).join("")+'<span class="c0"><i class="dot"></i>Sem dono</span><span><i class="hatch"></i>Listrado = previsão</span></div>';
   } else {
     var sum={by:{},none:0,total:0};S.people.forEach(function(p){sum.by[p]=0});
     body='<div class="tw"><table class="num"><thead><tr><th>Mês</th>'+S.people.map(function(p){return '<th>'+esc(p)+'</th>'}).join("")+'<th>Sem dono</th><th>Total</th></tr></thead><tbody>'+data.map(function(d){
@@ -570,81 +562,81 @@ function chartHTML(){
   }
   return '<section class="card">'+head+body+'</section>';
 }
-function listHTML(){
-  var i=S.sel,k=mid(i),b=S.bills[k],es=entriesFor(i),real=b&&b.imported;
+function listHTML(rm){
+  var i=S.sel,es=entriesFor(i,rm);
   var counts={all:es.length,none:0};S.people.forEach(function(p){counts[p]=0});
   es.forEach(function(e){if(isP(e.owner))counts[e.owner]++;else counts.none++;});
   var f=S.filter;if(f!=="all"&&f!=="none"&&!isP(f))f="all";
   var shown=es.filter(function(e){return f==="all"||(f==="none"?!isP(e.owner):e.owner===f)});
-  var groups={},order=[];
-  shown.forEach(function(e){var g=e.key+"|"+(e.total||"")+"|"+e.src;if(!groups[g]){groups[g]={id:g,key:e.key,src:e.src,name:e.name,items:[],sum:0,proj:e.projected,kind:e.kind,cur:e.cur,total:e.total};order.push(g);}groups[g].items.push(e);groups[g].sum+=e.amount;});
-  order.sort(function(a,c){return groups[c].sum-groups[a].sum});
-  var chipList=[["all","Todos"]].concat(S.people.map(function(p){return [p,p]})).concat([["none","Sem dono"]]);
+  var gs={},order=[];
+  shown.forEach(function(e){var g=gidOf(e);if(!gs[g]){gs[g]={id:g,name:e.name,items:[],sum:0,proj:e.projected,kind:e.kind,cur:e.cur,total:e.total,card:e.row.card};order.push(g);}gs[g].items.push(e);gs[g].sum+=e.amount;});
+  order.sort(function(a,c){return gs[c].sum-gs[a].sum});
+  var chipList=[["all","Todos"]].concat(S.people.filter(function(p){return counts[p]>0||BASE.indexOf(p)>-1}).map(function(p){return [p,p]})).concat([["none","Sem dono"]]);
   var chips=chipList.map(function(c){return '<button class="chip'+(f===c[0]?' on':'')+'" data-act="filter" data-f="'+esc(c[0])+'">'+esc(c[1])+'<b class="num">'+counts[c[0]]+'</b></button>'}).join("");
   var banner=counts.none>0?'<div class="banner"><span>'+counts.none+' lançamento'+(counts.none===1?'':'s')+' sem dono neste mês.</span><span><button class="btn sm" data-act="allnone" data-p="'+esc(BASE[0])+'">Marcar tudo como '+esc(BASE[0])+'</button></span></div>':'';
   var rows=order.map(function(g){
-    var G=groups[g],owners={};G.items.forEach(function(e){owners[e.owner||""]=1});
+    var G=gs[g],owners={};G.items.forEach(function(e){owners[e.owner||""]=1});
     var ow=Object.keys(owners).length===1?Object.keys(owners)[0]:"";
     var meta='';
     if(G.total)meta+='<span class="tag">parcela '+G.cur+'/'+G.total+(G.total>G.cur?' · faltam '+(G.total-G.cur):' · última')+'</span>';
-    else meta+='<button class="tag btnlike'+(G.kind==="recorrente"?' on':'')+'" data-act="kind" data-key="'+esc(G.key)+'" data-src="'+G.src+'" title="Marque se repete todo mês">'+(G.kind==="recorrente"?'Repete todo mês':'Só neste mês')+'</button>';
+    else meta+='<button class="tag btnlike'+(G.kind==="recorrente"?' on':'')+'" data-act="kind" data-g="'+esc(G.id)+'" title="Marque se repete todo mês">'+(G.kind==="recorrente"?'Repete todo mês':'Só neste mês')+'</button>';
     if(G.items.length>1)meta+='<span class="tag">×'+G.items.length+'</span>';
+    if(S.card==="all"&&G.card)meta+='<span class="tag">'+esc(G.card)+'</span>';
     if(G.proj)meta+='<span class="tag">previsto</span>';
     var open=S.open[G.id];
-    var det=open?'<div class="det">'+G.items.map(function(e){return '<div><span class="dn">'+(dateBR(e.date)?dateBR(e.date)+' · ':'')+esc(e.name)+'</span><span class="da num">'+BRL.format(e.amount)+(e.projected?'':' <button data-act="ign" data-src="'+e.src+'" data-id="'+esc(e.id)+'">ignorar</button>')+'</span></div>'}).join("")+'</div>':'';
-    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><button data-act="open" data-g="'+esc(G.id)+'" aria-expanded="'+!!open+'">'+esc(G.name)+'</button></div><div class="m">'+meta+'</div></div><div class="amt num">'+BRL.format(r2(G.sum))+'</div>'+ownerSeg(ow,G.key,G.src)+'</div>'+det+'</div>';
+    var det=open?'<div class="det">'+G.items.map(function(e){return '<div><span class="dn">'+(dateBR(e.date)?dateBR(e.date)+' · ':'')+esc(e.name)+(e.row.category?' · '+esc(e.row.category):'')+'</span><span class="da num">'+BRL.format(e.amount)+' <button data-act="del" data-id="'+esc(e.id)+'">'+(e.total?'excluir compra':'excluir')+'</button></span></div>'}).join("")+'</div>':'';
+    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><button data-act="open" data-g="'+esc(G.id)+'" aria-expanded="'+!!open+'">'+esc(G.name)+'</button></div><div class="m">'+meta+'</div></div><div class="amt num">'+BRL.format(r2(G.sum))+'</div>'+ownerSeg(ow,G.id)+'</div>'+det+'</div>';
   }).join("");
   if(!order.length)rows='<div class="empty">Nenhum lançamento neste filtro.</div>';
-  var ign=[];
-  if(real)b.items.forEach(function(x){if(x.ignored)ign.push(x)});
-  var ignHTML='';
-  if(ign.length){
-    ignHTML='<div class="ign"><button class="btn text sm" data-act="showign">'+(S.showIgn?'Esconder':'Ver')+' fora da conta ('+ign.length+')</button>'+(S.showIgn?'<div class="det">'+ign.map(function(x){return '<div><span class="dn">'+(dateBR(x.date)?dateBR(x.date)+' · ':'')+esc(x.name)+' <span class="tag">'+esc(x.reason)+'</span></span><span class="da num">'+BRL.format(x.amount)+' <button data-act="inc" data-src="'+k+'" data-id="'+esc(x.id)+'">incluir</button></span></div>'}).join("")+'</div>':'')+'</div>';
-  }
   var pdl=isP(f)&&counts[f]>0?'<button class="btn sm primary" data-act="pxlsx" data-p="'+esc(f)+'">Baixar lista de '+esc(f)+'</button><button class="btn sm" data-act="pcopy" data-p="'+esc(f)+'">Copiar texto</button>':'';
-  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="addform">+ Lançamento</button>'+(real?'<button class="btn sm text" data-act="delbill" data-m="'+k+'">Excluir fatura</button>':'')+'</div></div>';
-  return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div>'+ignHTML+'</section>';
+  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
+  return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div></section>';
 }
-function histHTML(){
-  var ks=Object.keys(S.bills).filter(function(k){return S.bills[k].imported}).sort().reverse();
+function histHTML(rm){
+  var ks=Object.keys(rm).map(Number).sort(function(a,b){return b-a}).slice(0,24);
   if(!ks.length)return '';
   var rows=ks.map(function(k){
-    var b=S.bills[k],t=totals(b.items.filter(function(x){return !x.ignored}).map(function(x){return x}));
-    var when=b.importedAt?new Date(b.importedAt).toLocaleDateString("pt-BR"):"";
-    return '<div class="hrow'+(pm(k)===S.sel?' sel':'')+'"><div class="hn"><b>'+mname(pm(k))+'</b><span>'+esc(b.file||"")+(when?' · importada em '+when:'')+' · '+b.items.filter(function(x){return !x.ignored}).length+' lançamentos</span></div><div class="amt num">'+BRL.format(t.total)+'</div><div class="hb"><button class="btn sm" data-act="sel" data-i="'+pm(k)+'">Abrir</button></div></div>';
+    var es=entriesFor(k,rm),t=totals(es);
+    return '<div class="hrow'+(k===S.sel?' sel':'')+'"><div class="hn"><b>'+mname(k)+'</b><span>'+es.length+' lançamentos</span></div><div class="amt num">'+BRL.format(t.total)+'</div><div class="hb"><button class="btn sm" data-act="sel" data-i="'+k+'">Abrir</button></div></div>';
   }).join("");
-  return '<section class="card"><div class="ch"><h2>Histórico de faturas</h2></div><p class="hnote">Cada fatura importada fica guardada pelo mês dela. Importar a de novembro não apaga a de outubro; só substitui se você importar o mesmo mês outra vez.</p><div class="hist">'+rows+'</div></section>';
+  return '<section class="card"><div class="ch"><h2>Histórico de faturas</h2></div><p class="hnote">Cada compra fica registrada como uma linha na planilha Google. Importar de novo a mesma fatura não duplica nada.</p><div class="hist">'+rows+'</div></section>';
 }
 function startHTML(){
-  return '<section class="card start"><span class="pill">Nenhuma fatura ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. As parcelas ainda em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
+  return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>No app do Nubank, exporte a fatura em CSV e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo CSV</button><div class="steps"><div class="step"><b>1 · Importe</b>Arquivo da fatura, como Nubank_2026-10-14.csv.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
 function render(){
   var m=$("#main");
-  var pl=$("#plot");if(pl)S.scroll=pl.scrollLeft;
-  if(!S.ready){m.innerHTML='<section class="card"><div class="empty">Carregando suas faturas…</div></section>';return;}
-  if(!Object.keys(S.bills).length){m.innerHTML=startHTML();}
-  else{m.innerHTML=heroHTML()+chartHTML()+listHTML()+histHTML();var p=$("#plot");if(p)p.scrollLeft=S.scroll;}
+  var pl=$("#plot"),first=S.scroll==null;if(pl)S.scroll=pl.scrollLeft;
+  if(!S.ready){m.innerHTML='<section class="card"><div class="empty">Carregando da planilha…</div></section>';$("#modal").innerHTML=modalHTML();return;}
+  if(!S.rows.some(function(r){return r.amount<0})){m.innerHTML=startHTML();}
+  else{
+    var rm=realMonths();
+    m.innerHTML=heroHTML(rm)+chartHTML(rm)+listHTML(rm)+histHTML(rm);
+    var p=$("#plot");
+    if(p){if(first||S.scroll==null){var c=p.querySelector(".col.sel");if(c)p.scrollLeft=c.offsetLeft-p.clientWidth/2;S.scroll=p.scrollLeft;}else p.scrollLeft=S.scroll;}
+  }
   $("#modal").innerHTML=modalHTML();
 }
+function cardOptions(){return '<datalist id="cardlist">'+cards().map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist>';}
 function modalHTML(){
   if(S.pending){
-    var p=S.pending,inc=p.items.filter(function(x){return !x.ignored}),tot=r2(inc.reduce(function(a,x){return a+x.amount},0));
-    var par=inc.filter(function(x){return x.cur}).length,withOwner=inc.filter(function(x){return x.owner}).length;
-    var ig=p.items.filter(function(x){return x.ignored});
-    var y=+p.month.slice(0,4),mo=+p.month.slice(5,7),exists=S.bills[p.month]&&S.bills[p.month].imported;
-    var ys="";for(var a=2025;a<=2029;a++)ys+='<option value="'+a+'"'+(a===y?' selected':'')+'>'+a+'</option>';
+    var p=S.pending,plan=planImport(p,p.card),inc=p.items.filter(function(x){return !x.ignored}),tot=r2(inc.reduce(function(a,x){return a+x.amount},0));
+    var ig=p.items.filter(function(x){return x.ignored}),withOwner=plan.add.filter(function(x){return x.person}).length;
+    var y=+p.month.slice(0,4),mo=+p.month.slice(5,7);
+    var ys="";for(var a=y-2;a<=y+2;a++)ys+='<option value="'+a+'"'+(a===y?' selected':'')+'>'+a+'</option>';
     var ms=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===mo?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><div class="kv"><span>Lançamentos na conta</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Parcelados</span><span class="num">'+par+'</span><span>Já com dono pelas escolhas anteriores</span><span class="num">'+withOwner+'</span><span>Fora da conta (pagamentos, créditos)</span><span class="num">'+ig.length+'</span></div>'+(exists?'<div class="warnbox">Já existe uma fatura de '+mname(pm(p.month))+'. Importar substitui só os lançamentos dela e mantém os donos já escolhidos. Os outros meses não mudam.</div>':'<div class="sub">As faturas dos outros meses continuam guardadas, sem mudar.</div>')+'<div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm">Importar</button></div></div></div>';
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label><div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.add.length+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Fora da conta (pagamentos, créditos)</span><span class="num">'+ig.length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
   }
   if(S.form){
-    return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Empréstimo, aluguel, mensalidade"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Adicionar</button></div></form></div>';
+    var defCard=S.card==="all"?"Nubank":S.card;
+    return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
   if(S.newp){
-    return '<div class="ov"><form class="dlg" id="newpf" role="dialog" aria-modal="true" aria-label="Outra pessoa"><h3>De quem é essa compra?</h3><label>Nome da pessoa<input id="np-name" required maxlength="24" placeholder="Ex.: Mãe, Fulano, Amiga"></label><div class="sub">O nome fica salvo e aparece como opção nas próximas compras.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
+    return '<div class="ov"><form class="dlg" id="newpf" role="dialog" aria-modal="true" aria-label="Outra pessoa"><h3>De quem é essa compra?</h3><label>Nome da pessoa<input id="np-name" required maxlength="24" placeholder="Ex.: Alessandra, Mãe"></label><div class="sub">O nome vai para a coluna “Quem usou” da planilha.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
   }
   if(S.pessoas){
-    var extras=S.people.slice(BASE.length).map(function(p,n){return '<div class="pl"><input value="'+esc(p)+'" maxlength="24" data-orig="'+esc(p)+'" aria-label="Nome"><button class="btn sm" data-act="renp" data-p="'+esc(p)+'">Renomear</button><button class="btn sm text" data-act="remp" data-p="'+esc(p)+'">Remover</button></div>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Pessoas"><h3>Pessoas</h3><div class="sub">Você (Matheus) é fixo. Adicione quem mais divide a fatura com você.</div>'+(extras||'<div class="sub">Nenhuma outra pessoa ainda.</div>')+'<form class="pl" id="addpf"><input id="ap-name" maxlength="24" placeholder="Nome da nova pessoa" aria-label="Nome da nova pessoa"><button class="btn primary sm" type="submit">Adicionar</button></form><div class="foot"><button class="btn" data-act="cancel">Fechar</button></div></div></div>';
+    var list=S.people.slice(BASE.length).map(function(p){var n=rowCount(p);return '<div class="pl"><span style="flex:1">'+esc(p)+' <span class="sub">· '+n+' compra'+(n===1?'':'s')+'</span></span>'+(n?'':'<button class="btn sm text" data-act="remp" data-p="'+esc(p)+'">Remover</button>')+'</div>'}).join("");
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Pessoas"><h3>Pessoas</h3><div class="sub">Você (Matheus) é fixo. As outras pessoas vêm da coluna “Quem usou” da planilha.</div>'+(list||'<div class="sub">Nenhuma outra pessoa ainda.</div>')+'<form class="pl" id="addpf"><input id="ap-name" maxlength="24" placeholder="Nome da nova pessoa" aria-label="Nome da nova pessoa"><button class="btn primary sm" type="submit">Adicionar</button></form><div class="foot"><button class="btn" data-act="cancel">Fechar</button></div></div></div>';
   }
   if(S.text){
     return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Texto"><h3>'+esc(S.text.title)+'</h3><textarea id="txt" readonly>'+esc(S.text.body)+'</textarea><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
@@ -652,49 +644,52 @@ function modalHTML(){
   return "";
 }
 
-/* ---------- import / manual ---------- */
+/* ---------- importar / lançar ---------- */
 async function handleFile(file){
   if(!file)return;
+  if(S.mode==="offline"){toast("Sem conexão com a planilha agora. Recarregue a página e tente de novo.");return;}
   try{
     var text=await file.text(),rows=parseCSV(text);
     if(rows.length<1)throw new Error("vazio");
     var items=buildItems(rows);
     if(!items.length)throw new Error("sem linhas");
-    var g=guessMonth(file.name,items);
-    applyRules(items,null);
-    S.pending={file:file.name,items:items,month:g.month,due:g.due};
+    S.pending={file:file.name,items:items,month:guessMonth(file.name,items),card:S.card==="all"?"Nubank":S.card};
     render();
   }catch(e){toast("Não consegui ler esse arquivo. Use o CSV exportado da fatura do Nubank.");}
 }
 function confirmImport(){
   var p=S.pending;if(!p)return;
-  var old=S.bills[p.month],manual=old?old.items.filter(function(x){return x.manual}):[];
-  applyRules(p.items,old?old.items:null);
-  var items=p.items.concat(manual);
-  S.bills[p.month]={month:p.month,due:p.due||null,imported:true,file:p.file,items:items,importedAt:new Date().toISOString()};
-  S.sel=pm(p.month);S.filter="all";S.pending=null;
-  persist(p.month,false);
-  render();toast("Fatura de "+mname(S.sel)+" importada.");
+  var plan=planImport(p,p.card);
+  S.pending=null;
+  if(!plan.add.length){render();return;}
+  if(commit([],plan.add)){
+    S.sel=pm(p.month);S.filter="all";S.scroll=null;
+    if(S.card!=="all"&&S.card!==p.card)S.card=p.card;
+    toast(plan.add.length+" compra"+(plan.add.length===1?"":"s")+" gravada"+(plan.add.length===1?"":"s")+" na planilha.");
+  }
+  render();
 }
 function addManual(){
   var name=$("#m-name").value.trim(),amt=parseAmount($("#m-amt").value),kind=$("#m-kind").value,own=$("#m-own").value;
+  var card=($("#m-card").value||"").trim()||"Nubank",cat=($("#m-cat").value||"").trim()||"Sem categoria";
   var cur=parseInt($("#m-cur").value,10),tot=parseInt($("#m-tot").value,10);
   if(!name||isNaN(amt)||amt<=0){toast("Preencha descrição e valor.");return;}
-  if(kind==="parcelado"&&(!(cur>=1)||!(tot>=cur))){toast("Informe a parcela atual e o total de parcelas.");return;}
-  var k=mid(S.sel);
-  if(!S.bills[k])S.bills[k]={month:k,due:null,imported:false,items:[]};
-  S.bills[k].items.push({id:"m"+Date.now(),date:"",name:name,key:normKey(name),amount:r2(amt),cur:kind==="parcelado"?cur:null,total:kind==="parcelado"?tot:null,kind:kind,owner:own,ignored:false,reason:"",manual:true});
-  S.form=false;persist(k,false);render();
+  if(kind==="parcelado"&&(!(cur>=1)||!(tot>=2)||cur>tot)){toast("Informe a parcela deste mês e o total de parcelas.");return;}
+  var F=kind==="parcelado"?S.sel-(cur-1):S.sel;
+  var date=S.sel===nowIdx()?todayISO():mid(F)+"-01";
+  var row={date:date,name:name,category:cat,account:card,amount:-r2(amt),person:own,card:card,status:"Credito",parcelas:kind==="parcelado"?tot:1,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(kind==="recorrente"?" [recorrente]":"")};
+  if(commit([],[row])){S.form=false;toast("Lançamento gravado.");}
+  render();
 }
 
-/* ---------- export ---------- */
+/* ---------- exportar ---------- */
 function safe(s){return String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^A-Za-z0-9]+/g,"_").replace(/^_|_$/g,"")||"pessoa";}
 function personEntries(p){
   return entriesFor(S.sel).filter(function(e){return e.owner===p}).sort(function(a,b){return (a.date||"9999").localeCompare(b.date||"9999")||b.amount-a.amount});
 }
 function personText(p){
   var es=personEntries(p),g={},order=[],tot=0;
-  es.forEach(function(e){var k=e.key+"|"+(e.total||"")+"|"+e.src;if(!g[k]){g[k]={name:e.name,cur:e.cur,total:e.total,n:0,sum:0};order.push(k);}g[k].n++;g[k].sum+=e.amount;tot+=e.amount;});
+  es.forEach(function(e){var k=gidOf(e);if(!g[k]){g[k]={name:e.name,cur:e.cur,total:e.total,n:0,sum:0};order.push(k);}g[k].n++;g[k].sum+=e.amount;tot+=e.amount;});
   var L=["Fatura do cartão","Referente a "+mname(S.sel)+" — "+p,""];
   order.forEach(function(k){var x=g[k];L.push("• "+x.name+(x.total?" ("+x.cur+"/"+x.total+")":"")+(x.n>1?" ×"+x.n:"")+" — "+BRL.format(r2(x.sum)));});
   L.push("","Total: "+BRL.format(r2(tot)));
@@ -710,47 +705,45 @@ function copyPerson(p){
   }catch(e){}
   show();
 }
-async function exportPerson(p){
+function exportPerson(p){
   try{
     if(!window.XLSX){toast("Download indisponível aqui.");return;}
-    var i=S.sel,es=personEntries(p),real=S.bills[mid(i)]&&S.bills[mid(i)].imported;
-    var A=[["Fatura do cartão — "+p],[mname(i)+(real?"":" (previsão)")],[],["Data","Descrição","Parcela","Valor (R$)"]];
+    var i=S.sel,rm=realMonths(),es=personEntries(p);
+    var A=[["Fatura do cartão — "+p],[mname(i)+(rm[i]?"":" (previsão)")],[],["Data","Descrição","Parcela","Valor (R$)"]];
     var sum=0;
     es.forEach(function(e){sum+=e.amount;A.push([dateBR(e.date),e.name,e.total?e.cur+"/"+e.total:(e.kind==="recorrente"?"mensal":""),{t:"n",v:e.amount,z:"#,##0.00"}]);});
     A.push(["","Total","",{t:"n",v:r2(sum),f:"SUM(D5:D"+(4+es.length)+")",z:"#,##0.00"}]);
     var w1=XLSX.utils.aoa_to_sheet(A);w1["!cols"]=[{wch:9},{wch:44},{wch:10},{wch:14}];
     var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,w1,"Fatura");
     var all=range().filter(function(m){return m>=i}),B=[["Mês","Valor (R$)","Situação"]];
-    all.forEach(function(m){var v=totals(entriesFor(m)).by[p],b=S.bills[mid(m)];if(v>0)B.push([mname(m),{t:"n",v:v,z:"#,##0.00"},b&&b.imported?"Fatura":"Previsão"]);});
+    all.forEach(function(m){var v=totals(entriesFor(m,rm)).by[p];if(v>0)B.push([mname(m),{t:"n",v:v,z:"#,##0.00"},rm[m]?"Fatura":"Previsão"]);});
     var w2=XLSX.utils.aoa_to_sheet(B);w2["!cols"]=[{wch:20},{wch:14},{wch:11}];
     XLSX.utils.book_append_sheet(wb,w2,"Próximos meses");
-    var buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-    saveFile("Fatura_"+safe(p)+"_"+mid(i)+".xlsx",buf);
+    saveFile("Fatura_"+safe(p)+"_"+mid(i)+".xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}));
     toast("Lista de "+p+" pronta.");
   }catch(e){toast("Não foi possível gerar a lista.");}
 }
-async function exportXlsx(){
+function exportXlsx(){
   try{
     if(!window.XLSX){toast("Download indisponível aqui.");return;}
-    var all=range(),wb=XLSX.utils.book_new(),np=S.people.length;
-    var col=function(n){return String.fromCharCode(66+n)};
+    var all=range(),rm=realMonths(),wb=XLSX.utils.book_new(),np=S.people.length;
+    var col=function(n){return XLSX.utils.encode_col(n+1)};
     var A=[["Mês"].concat(S.people).concat(["Sem dono","Total","Situação"])];
-    all.forEach(function(i,n){var t=totals(entriesFor(i)),b=S.bills[mid(i)],r=n+2;
+    all.forEach(function(i,n){var t=totals(entriesFor(i,rm)),r=n+2;
       var row=[mname(i)];S.people.forEach(function(p){row.push({t:"n",v:t.by[p],z:"#,##0.00"})});
       row.push({t:"n",v:t.none,z:"#,##0.00"});
       row.push({t:"n",v:t.total,f:"SUM(B"+r+":"+col(np)+r+")",z:"#,##0.00"});
-      row.push(b&&b.imported?"Fatura":"Previsão");A.push(row);});
+      row.push(rm[i]?"Fatura":"Previsão");A.push(row);});
     var L=all.length+1,tr=["Total"];
     for(var c=0;c<=np+1;c++){var s=0;for(var r=1;r<A.length;r++)s+=A[r][c+1].v;tr.push({t:"n",v:r2(s),f:"SUM("+col(c)+"2:"+col(c)+L+")",z:"#,##0.00"});}
     A.push(tr);
     var w1=XLSX.utils.aoa_to_sheet(A);w1["!cols"]=[{wch:20}].concat(S.people.map(function(){return {wch:13}})).concat([{wch:13},{wch:14},{wch:11}]);
     XLSX.utils.book_append_sheet(wb,w1,"Resumo");
-    var B=[["Mês","Descrição","Dono","Tipo","Parcela","Valor","Situação"]];
-    all.forEach(function(i){entriesFor(i).forEach(function(e){B.push([mname(i),e.name,e.owner||"Sem dono",e.kind==="parcelado"?"Parcelado":e.kind==="recorrente"?"Recorrente":"Avulso",e.total?e.cur+"/"+e.total:"",{t:"n",v:e.amount,z:"#,##0.00"},e.projected?"Previsão":"Fatura"]);});});
-    var w2=XLSX.utils.aoa_to_sheet(B);w2["!cols"]=[{wch:20},{wch:38},{wch:12},{wch:12},{wch:9},{wch:12},{wch:11}];
+    var B=[["Mês","Descrição","Dono","Cartão","Tipo","Parcela","Valor","Situação"]];
+    all.forEach(function(i){entriesFor(i,rm).forEach(function(e){B.push([mname(i),e.name,e.owner||"Sem dono",e.row.card,e.kind==="parcelado"?"Parcelado":e.kind==="recorrente"?"Recorrente":"Avulso",e.total?e.cur+"/"+e.total:"",{t:"n",v:e.amount,z:"#,##0.00"},e.projected?"Previsão":"Fatura"]);});});
+    var w2=XLSX.utils.aoa_to_sheet(B);w2["!cols"]=[{wch:20},{wch:38},{wch:12},{wch:12},{wch:12},{wch:9},{wch:12},{wch:11}];
     XLSX.utils.book_append_sheet(wb,w2,"Lançamentos");
-    var buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-    saveFile("Fatura_cartao.xlsx",buf);
+    saveFile("Fatura_cartao.xlsx",XLSX.write(wb,{type:"array",bookType:"xlsx"}));
     toast("Planilha pronta.");
   }catch(e){toast("Não foi possível gerar a planilha.");}
 }
@@ -758,37 +751,31 @@ async function exportXlsx(){
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
 function closeAll(){S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
-/* ---------- events ---------- */
+/* ---------- eventos ---------- */
 document.addEventListener("click",function(ev){
   var el=ev.target.closest("[data-act]");
   if(!el){ if(ev.target.classList&&ev.target.classList.contains("ov")){closeAll();render();} return; }
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="pick"){$("#file").click();return;}
   if(a==="xlsx"){exportXlsx();return;}
-  if(a==="bkout"){exportBackup();return;}
-  if(a==="bkin"){$("#bkfile").click();return;}
   if(a==="pxlsx"){exportPerson(d.p);return;}
   if(a==="pcopy"){copyPerson(d.p);return;}
   if(a==="copytxt"){var t=$("#txt");if(t){t.select();try{navigator.clipboard.writeText(t.value).then(function(){toast("Texto copiado.")},function(){toast("Selecione o texto e copie.")});}catch(e){toast("Selecione o texto e copie.");}}return;}
-  if(a==="prev"||a==="next"){var all=range(),n=S.sel+(a==="next"?1:-1);if(n>=all[0]&&n<=all[all.length-1]){S.sel=n;S.filter="all";render();var c=document.querySelector(".col.sel");if(c&&c.scrollIntoView)c.scrollIntoView({inline:"center",block:"nearest"});}return;}
+  if(a==="prev"||a==="next"){var all=range(),n=S.sel+(a==="next"?1:-1);if(n>=all[0]&&n<=all[all.length-1]){S.sel=n;S.filter="all";S.scroll=null;render();}return;}
   if(a==="sel"){S.sel=+d.i;S.filter="all";render();window.scrollTo&&window.scrollTo({top:0,behavior:"smooth"});return;}
   if(a==="view"){S.view=d.v;render();return;}
   if(a==="filter"){S.filter=d.f;render();return;}
-  if(a==="owner"){setOwner(d.key,d.src,d.p);render();return;}
-  if(a==="newp"){S.newp={key:d.key,src:d.src};render();var inp=$("#np-name");if(inp)inp.focus();return;}
-  if(a==="kind"){setKind(d.key,d.src);render();return;}
+  if(a==="owner"){setOwner(d.g,d.p);render();return;}
+  if(a==="newp"){S.newp={g:d.g};render();var inp=$("#np-name");if(inp)inp.focus();return;}
+  if(a==="kind"){setKind(d.g);render();return;}
   if(a==="allnone"){assignAllNone(d.p);render();return;}
   if(a==="open"){S.open[d.g]=!S.open[d.g];render();return;}
-  if(a==="ign"){toggleIgnore(d.src,d.id,true);render();return;}
-  if(a==="inc"){toggleIgnore(d.src,d.id,false);render();return;}
-  if(a==="showign"){S.showIgn=!S.showIgn;render();return;}
-  if(a==="delbill"){
-    if(el.dataset.sure){deleteBill(d.m);render();return;}
-    el.dataset.sure="1";el.textContent="Confirmar exclusão";return;
+  if(a==="del"){
+    if(el.dataset.sure){deleteRow(d.id);render();return;}
+    el.dataset.sure="1";el.textContent="confirmar exclusão";return;
   }
-  if(a==="addform"){S.form=true;render();return;}
+  if(a==="addform"){S.form=true;render();var mn=$("#m-name");if(mn)mn.focus();return;}
   if(a==="pessoas"){S.pessoas=true;render();return;}
-  if(a==="renp"){var row=el.parentNode.querySelector("input");renamePerson(d.p,row.value);render();return;}
   if(a==="remp"){removePerson(d.p);render();return;}
   if(a==="cancel"){closeAll();render();return;}
   if(a==="confirm"){confirmImport();return;}
@@ -796,9 +783,10 @@ document.addEventListener("click",function(ev){
 document.addEventListener("change",function(ev){
   var t=ev.target;
   if(t.id==="file"){handleFile(t.files[0]);t.value="";return;}
-  if(t.id==="bkfile"){importBackup(t.files[0]);t.value="";return;}
-  if(S.pending&&(t.id==="imp-m"||t.id==="imp-y")){
-    var m=$("#imp-m").value,y=$("#imp-y").value;S.pending.month=y+"-"+String(m).padStart(2,"0");S.pending.due=null;
+  if(t.id==="cardsel"){S.card=t.value;S.filter="all";S.scroll=null;saveLocal();var all=range();if(all.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),all[0]),all[all.length-1]);render();return;}
+  if(S.pending&&(t.id==="imp-m"||t.id==="imp-y"||t.id==="imp-card")){
+    S.pending.month=$("#imp-y").value+"-"+pad($("#imp-m").value);
+    S.pending.card=($("#imp-card").value||"").trim()||"Nubank";
     render();return;
   }
   if(t.id==="m-kind"){$("#m-par").hidden=t.value!=="parcelado";}
@@ -806,7 +794,7 @@ document.addEventListener("change",function(ev){
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
   if(id==="addf"){ev.preventDefault();addManual();}
-  else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var nw=S.newp;S.newp=null;var b=S.bills[nw.src],cur=null;if(b)b.items.forEach(function(x){if(x.key===nw.key)cur=x.owner});if(cur!==n)setOwner(nw.key,nw.src,n);render();}}
+  else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
 document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});

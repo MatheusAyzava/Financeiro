@@ -9,20 +9,26 @@ npm install
 npm run dev
 ```
 
+## Banco de dados: planilha Google
+
+Tudo o que entra no app é gravado na aba `Lancamentos` da planilha, uma linha por compra:
+
+```text
+Data | Descricao | Categoria | Conta | Valor | Quem usou | Cartao | Status | Parcelas | Observacao
+```
+
+- Compras parceladas são gravadas uma vez só, com `Parcelas` e `[primeira-parcela=AAAA-MM]` na observação; o app calcula as parcelas dos outros meses.
+- Importar a mesma fatura de novo não duplica: compras que já estão na planilha são ignoradas.
+- Trocar o dono ou marcar "Repete todo mês" regrava a linha da compra; "excluir" apaga a linha.
+- O app lê e grava pelo Apps Script da planilha, definido na variável `VITE_GOOGLE_SCRIPT_URL` do Netlify. Ele usa só as ações `listTransactions`, `appendTransactions` e `deleteTransaction`, que já existem no script.
+
+Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
+
 ## Como usar
 
-- **Importar fatura**: escolha o CSV exportado da fatura. Cada fatura fica guardada pelo mês dela.
-- **Dono de cada compra**: Matheus é fixo; use `Outro…` ou `Pessoas` para adicionar quem mais usou o cartão. O app lembra o dono nas próximas faturas.
-- **Parcelas**: compras parceladas aparecem listradas como previsão nos meses seguintes.
+- **Importar fatura**: escolha o CSV exportado da fatura e o cartão. O app mostra quantas compras são novas antes de gravar.
+- **Dono de cada compra**: Matheus é fixo; as outras pessoas vêm da coluna `Quem usou`. O app sugere o dono pelas compras anteriores com o mesmo nome.
+- **Cartão**: o seletor no topo filtra por cartão (Nubank, Carrefour, …) ou mostra todos.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
-- **Baixar backup / Restaurar backup**: leva os dados para outro navegador ou aparelho.
 
-## Dados
-
-Os dados ficam salvos no navegador. Para sincronizar com a planilha Google:
-
-1. Na planilha, abra `Extensões > Apps Script`, apague o código e cole o conteúdo de [`apps-script/Code.gs`](apps-script/Code.gs).
-2. `Implantar > Gerenciar implantações`, clique no lápis, escolha `Nova versão` e `Implantar` (ou `Nova implantação` > `App da Web`, executar como `Eu`, acesso `Qualquer pessoa`, se ainda não houver uma).
-3. No Netlify, defina a variável `VITE_GOOGLE_SCRIPT_URL` com a URL que termina em `/exec` e faça um novo deploy.
-
-Na primeira vez que a planilha responder, o que já estiver salvo no navegador é enviado para a aba `Faturas` (criada automaticamente). Depois disso, todos os aparelhos usam a planilha.
+O arquivo [`apps-script/Code.gs`](apps-script/Code.gs) tem uma versão completa do Apps Script, caso precise reinstalar.
