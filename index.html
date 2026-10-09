@@ -99,6 +99,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .toplist small{color:var(--muted);font-size:12px}
 .avgbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border-radius:16px;padding:12px 16px;font-size:14px;color:var(--muted)}
 .avgbox input{font:inherit;color:var(--ink);background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:6px 10px;width:120px}
+.tag.late{background:rgba(240,107,170,.18);color:var(--exp)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
 .btn:disabled{opacity:.5;cursor:default}
@@ -234,6 +235,9 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
       <span class="mark" aria-hidden="true"></span>
       <div><h1 id="ttl">Fatura do Cartão</h1><p id="sttl">Gastos do cartão divididos por pessoa</p></div>
     </div>
+    <div class="actions" id="actCasa" hidden>
+      <button class="btn primary" data-act="hform">+ Conta da casa</button>
+    </div>
     <div class="actions" id="actInc" hidden>
       <button class="btn primary" data-act="incform">+ Recebimento</button>
     </div>
@@ -247,7 +251,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
       <input type="file" id="file" accept=".csv,.txt,.ofx,.qfx,.xls,.xlsx,.pdf,.zip,text/csv,text/plain,application/pdf,application/zip" hidden>
     </div>
   </header>
-  <nav class="tabs" aria-label="Seções"><button data-act="tab" data-t="fatura" id="tab-fatura">Fatura</button><button data-act="tab" data-t="recebidos" id="tab-recebidos">Recebidos</button><button data-act="tab" data-t="resumo" id="tab-resumo">Gastos x Recebidos</button><button data-act="tab" data-t="emprestimos" id="tab-emprestimos">Empréstimos</button></nav>
+  <nav class="tabs" aria-label="Seções"><button data-act="tab" data-t="fatura" id="tab-fatura">Fatura</button><button data-act="tab" data-t="casa" id="tab-casa">Casa</button><button data-act="tab" data-t="recebidos" id="tab-recebidos">Recebidos</button><button data-act="tab" data-t="resumo" id="tab-resumo">Gastos x Recebidos</button><button data-act="tab" data-t="emprestimos" id="tab-emprestimos">Empréstimos</button></nav>
   <main id="main" class="app" style="gap:16px"></main>
   <p class="foot-note" id="note"></p>
 </div>
@@ -283,7 +287,7 @@ var todayISO=function(){var d=new Date();return d.getFullYear()+"-"+pad(d.getMon
 var nowIdx=function(){var d=new Date();return idx(d.getFullYear(),d.getMonth()+1)};
 var LOCAL_KEY="fatura-matheus-v2";
 
-var TABS=["fatura","recebidos","resumo","emprestimos"];
+var TABS=["fatura","casa","recebidos","resumo","emprestimos"];
 var S={tab:TABS.indexOf(location.hash.slice(1))>0?location.hash.slice(1):"fatura",gabiAvg:1000,rows:[],extra:[],people:BASE.slice(),card:"all",sel:null,filter:"all",view:"chart",open:{},ready:false,mode:"local",pending:null,form:false,pessoas:false,newp:null,text:null,canDl:false,scroll:null,busy:0};
 var isP=function(o){return S.people.indexOf(o)>-1};
 var cls=function(p){var n=S.people.indexOf(p);return n<0?"c0":"c"+((n%8)+1)};
@@ -533,7 +537,7 @@ var CARDS=["Nubank","Itaú","C6","Banco do Brasil",GABI];
 function sameCard(a,b){return normKey(a||"")===normKey(b||"");}
 function cards(){var c=CARDS.slice();S.rows.forEach(function(r){if(r.amount<0&&r.card&&!c.some(function(x){return sameCard(x,r.card)}))c.push(r.card)});return c;}
 function cardName(n){return cards().find(function(c){return sameCard(c,n)})||n;}
-function expenses(card){card=card||S.card;return S.rows.filter(function(r){return r.amount<0&&r.name&&(card==="all"||sameCard(r.card,card))&&firstMonth(r)!=null});}
+function expenses(card){card=card||S.card;return S.rows.filter(function(r){return r.amount<0&&r.name&&!isHouse(r)&&(card==="all"||sameCard(r.card,card))&&firstMonth(r)!=null});}
 
 /* ---------- modelo ---------- */
 function realMonths(){var s={};expenses().forEach(function(r){if(r.parcelas<=1)s[firstMonth(r)]=1});return s;}
@@ -825,16 +829,23 @@ function histHTML(rm){
 function startHTML(){
   return '<section class="card start"><span class="pill">Nenhuma compra ainda</span><h2>Suba o CSV da fatura e o resto se monta sozinho</h2><p>Exporte a fatura do banco (CSV, OFX, Excel, PDF ou ZIP, com ou sem senha) e solte o arquivo aqui. Cada compra vira uma linha na planilha Google, as parcelas em aberto são projetadas para os próximos meses, e você diz de quem é cada compra uma vez só.</p><button class="btn primary" data-act="pick">Escolher arquivo da fatura</button><div class="steps"><div class="step"><b>1 · Importe</b>CSV, OFX, Excel, PDF ou ZIP da fatura.</div><div class="step"><b>2 · Dê um dono</b>Você ou o nome de quem usou o cartão. Da próxima vez ele lembra.</div><div class="step"><b>3 · Veja os meses</b>Total de cada pessoa até o fim das parcelas.</div></div><div class="dz">Ou arraste o arquivo para qualquer lugar desta página</div></section>';
 }
-var TAB_INFO={fatura:["Fatura do Cartão","Gastos do cartão divididos por pessoa"],recebidos:["Recebidos","Quanto entrou, de onde e quando"],resumo:["Gastos x Recebidos","Onde mais gastamos e quanto sobra"],emprestimos:["Empréstimos","O que você pegou, as parcelas e quanto falta"]};
+var TAB_INFO={fatura:["Fatura do Cartão","Gastos do cartão divididos por pessoa"],casa:["Casa","Aluguel e contas que não são do cartão"],recebidos:["Recebidos","Quanto entrou, de onde e quando"],resumo:["Gastos x Recebidos","Onde mais gastamos e quanto sobra"],emprestimos:["Empréstimos","O que você pegou, as parcelas e quanto falta"]};
 function renderChrome(){
   var t=S.tab;
   $("#ttl").textContent=TAB_INFO[t][0];$("#sttl").textContent=TAB_INFO[t][1];document.title=TAB_INFO[t][0];
-  $("#actLoans").hidden=t!=="emprestimos";$("#actFatura").hidden=t!=="fatura";$("#actInc").hidden=t!=="recebidos";
+  $("#actLoans").hidden=t!=="emprestimos";$("#actFatura").hidden=t!=="fatura";$("#actInc").hidden=t!=="recebidos";$("#actCasa").hidden=t!=="casa";
   TABS.forEach(function(x){$("#tab-"+x).className=x===t?"on":""});
 }
 function render(){
   renderChrome();note();
   var m=$("#main");
+  if(S.tab==="casa"){
+    var hp=$("#hplot"),hk=hp?hp.scrollLeft:null;
+    m.innerHTML=!S.ready?'<section class="card"><div class="empty">Carregando da planilha…</div></section>':houseHTML();
+    var nh=$("#hplot");if(nh){if(hk==null){var c3=nh.querySelector(".col.sel");if(c3)nh.scrollLeft=c3.offsetLeft-nh.clientWidth/2;}else nh.scrollLeft=hk;}
+    $("#modal").innerHTML=H.form?houseFormHTML():H.pay?housePayFormHTML():modalHTML();
+    return;
+  }
   if(S.tab==="recebidos"||S.tab==="resumo"){
     var keepId=S.tab==="recebidos"?"#iplot":"#rplot",kp=$(keepId),keep=kp?kp.scrollLeft:null;
     m.innerHTML=!S.ready?'<section class="card"><div class="empty">Carregando da planilha…</div></section>':(S.tab==="recebidos"?incomeHTML():summaryHTML());
@@ -1002,7 +1013,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1214,6 +1225,7 @@ function submitIncome(){
 function spendFor(i){
   var keep=S.card;S.card="all";var es;try{es=entriesFor(i)}finally{S.card=keep;}
   var out=es.map(function(e){return {name:e.name,amount:e.amount,category:e.virtual?"Cartão Gabi (média)":(e.row.category||"Sem categoria"),card:e.virtual?GABI:(cardName(e.row.card)||"Sem cartão"),person:e.owner||"Sem dono",projected:e.projected}});
+  houseFor(i).forEach(function(h){out.push({name:h.name,amount:h.amount,category:h.category,card:"Contas da casa",person:BASE[0],projected:!h.paid})});
   monthLoans(i).forEach(function(l){out.push({name:l.name,amount:l.inst,category:"Empréstimos",card:"Empréstimos",person:BASE[0],projected:!isPaid(l,i)})});
   return out;
 }
@@ -1256,6 +1268,106 @@ function summaryHTML(){
   return chips+kpis+pairs+accCard+'<div class="grid2">'+cat+card+'</div><div class="grid2">'+per+topC+'</div>'+catm;
 }
 
+/* ---------- casa: aluguel e contas que não são do cartão ---------- */
+/* Na aba Lancamentos, sem cartão e com marcadores na observação:
+   conta fixa  -> [conta-casa] [recorrente] [vencimento=DD] [primeira-parcela=AAAA-MM]  (Valor = previsto)
+   pagamento   -> [conta-casa] [pago] [primeira-parcela=AAAA-MM]                       (Valor = pago de fato) */
+var H={sel:null,form:null,pay:null};
+var HOUSE_CATS=["Aluguel","Condomínio","Luz","Água","Internet","Gás","IPTU","Telefone","Streaming","Faxina","Outros"];
+function isHouse(r){return /\[conta-casa\]/.test(r.notes);}
+function houseTemplates(){return S.rows.filter(function(r){return r.amount<0&&isHouse(r)&&isRec(r)&&firstMonth(r)!=null});}
+function housePayments(){return S.rows.filter(function(r){return r.amount<0&&isHouse(r)&&/\[pago\]/.test(r.notes)&&firstMonth(r)!=null});}
+function dueDay(r){var m=r.notes.match(/\[vencimento=(\d{1,2})\]/);return m?+m[1]:null;}
+function houseFor(i){
+  var pays=housePayments().filter(function(p){return firstMonth(p)===i}),used={},out=[];
+  houseTemplates().forEach(function(t){
+    if(firstMonth(t)>i)return;
+    var k=normKey(t.name),mine=pays.filter(function(p){return normKey(p.name)===k});
+    mine.forEach(function(p){used[p.id]=1});
+    var paid=mine.length>0;
+    out.push({tpl:t,pays:mine,name:t.name,category:t.category||"Outros",due:dueDay(t),amount:paid?r2(mine.reduce(function(a,p){return a+Math.abs(p.amount)},0)):Math.abs(t.amount),expected:Math.abs(t.amount),paid:paid,projected:!paid});
+  });
+  pays.forEach(function(p){if(!used[p.id])out.push({tpl:null,pays:[p],name:p.name,category:p.category||"Outros",due:null,amount:Math.abs(p.amount),expected:Math.abs(p.amount),paid:true,projected:false});});
+  return out;
+}
+function houseStatus(h,i){
+  if(h.paid)return {t:"paga",c:"ok"};
+  var now=nowIdx();
+  if(i<now)return {t:"não paga",c:"late"};
+  if(i===now&&h.due&&new Date().getDate()>h.due)return {t:"atrasada",c:"late"};
+  return {t:h.due?"vence dia "+h.due:"em aberto",c:""};
+}
+function houseRange(){
+  var now=nowIdx(),start=now-5,end=now+3;
+  houseTemplates().concat(housePayments()).forEach(function(r){start=Math.min(start,firstMonth(r));});
+  start=Math.max(start,now-24);
+  var a=[];for(var i=start;i<=end;i++)a.push(i);return a;
+}
+function houseCls(name){var ks=houseTemplates().map(function(t){return normKey(t.name)}),n=ks.indexOf(normKey(name));return "c"+(((n<0?ks.length:n)%8)+1);}
+function houseHTML(){
+  var all=houseRange();
+  if(H.sel==null||all.indexOf(H.sel)<0)H.sel=Math.min(Math.max(nowIdx(),all[0]),all[all.length-1]);
+  var i=H.sel,hs=houseFor(i);
+  if(!houseTemplates().length&&!housePayments().length)return '<section class="card start"><span class="pill">Nenhuma conta ainda</span><h2>Aluguel e contas de casa</h2><p>Cadastre aluguel, condomínio, luz, água, internet e outras contas que não passam pelo cartão. Elas aparecem todo mês com o vencimento; quando pagar, marque e informe o valor real. Tudo fica registrado na planilha Google, aba Lancamentos.</p><button class="btn primary" data-act="hform">+ Conta da casa</button></section>';
+  var tot=r2(hs.reduce(function(a,h){return a+h.amount},0)),paid=r2(hs.filter(function(h){return h.paid}).reduce(function(a,h){return a+h.amount},0)),left=r2(tot-paid);
+  var late=hs.filter(function(h){return houseStatus(h,i).c==="late"}).length;
+  var next=hs.filter(function(h){return !h.paid&&h.due}).sort(function(a,b){return a.due-b.due})[0];
+  var hero='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="hprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="hnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">Contas da casa no mês</span><div class="big num">'+BRL.format(tot)+'</div><div class="sub">'+hs.length+' conta'+(hs.length===1?'':'s')+(late?' · <b class="exp-t">'+late+' atrasada'+(late===1?'':'s')+'</b>':'')+'</div></div></div><div class="people">'
+    +'<div class="person cinc"><div class="n"><span class="dot"></span>Pago</div><div class="v num">'+BRL.format(paid)+'</div><div class="bar"><i style="width:'+(tot?Math.round(paid/tot*100):0)+'%"></i></div><div class="s num">'+(tot?Math.round(paid/tot*100):0)+'% do mês</div></div>'
+    +'<div class="person cexp"><div class="n"><span class="dot"></span>Falta pagar</div><div class="v num">'+BRL.format(left)+'</div><div class="s">'+(next?'próxima: '+esc(next.name)+' dia '+next.due:(left?'':'tudo pago'))+'</div></div>'
+    +'</div></section>';
+  var data=all.map(function(m){var x=houseFor(m);return {i:m,hs:x,t:r2(x.reduce(function(a,h){return a+h.amount},0))}});
+  var mx=Math.max.apply(null,data.map(function(d){return d.t}).concat([1]));
+  var chart='<section class="card"><div class="ch"><h2>Contas da casa mês a mês</h2></div><div class="plot" id="hplot">'+data.map(function(d){
+    var segs=d.hs.map(function(h){return '<i class="'+houseCls(h.name)+(h.paid?'':' pr')+'" style="height:'+Math.max(2,h.amount/mx*200)+'px" title="'+esc(h.name)+': '+BRL.format(h.amount)+(h.paid?' (paga)':' (prevista)')+'"></i>'}).join("");
+    return '<button class="col'+(d.i===i?' sel':'')+'" data-act="hsel" data-i="'+d.i+'"><span class="tot num">'+(d.t?N0.format(d.t):'–')+'</span><div class="stack">'+segs+'</div><span class="lbl">'+mshort(d.i)+'</span></button>';
+  }).join("")+'</div><div class="legend">'+houseTemplates().map(function(t){return '<span class="'+houseCls(t.name)+'"><i class="dot"></i>'+esc(t.name)+'</span>'}).join("")+'<span><i class="hatch"></i>Listrado = ainda não pago</span></div></section>';
+  var rows=hs.slice().sort(function(a,b){return (a.paid-b.paid)||((a.due||99)-(b.due||99))}).map(function(h){
+    var st=houseStatus(h,i),id=h.tpl?h.tpl.id:h.pays[0].id,open=S.open["H"+id];
+    var meta='<span class="tag">'+esc(h.category)+'</span>'+(h.due?'<span class="tag">vence dia '+h.due+'</span>':'')+'<span class="tag'+(st.c==="late"?' late':'')+(st.c==="ok"?' on':'')+'">'+st.t+'</span>'+(h.paid&&h.tpl&&Math.abs(h.amount-h.expected)>0.009?'<span class="tag">previsto '+BRL.format(h.expected)+'</span>':'');
+    var btn=h.paid?'<button class="o cinc on" data-act="hunpay" data-id="'+esc(id)+'" title="Desfazer pagamento">Paga ✓</button>':'<button class="o" data-act="hpay" data-id="'+esc(id)+'">Pagar</button>';
+    var det=open?'<div class="det">'+h.pays.map(function(p){return '<div><span class="dn">Pago em '+esc(p.date.split("-").reverse().join("/"))+(p.account?' · '+esc(p.account):'')+'</span><span class="da num">'+BRL.format(Math.abs(p.amount))+'</span></div>'}).join("")+(h.tpl?'<div><span class="dn">Valor previsto '+BRL.format(h.expected)+(h.tpl.account?' · paga pela conta '+esc(h.tpl.account):'')+'</span><span class="da"><button data-act="hedit" data-id="'+esc(h.tpl.id)+'">editar conta</button><button data-act="hdel" data-id="'+esc(h.tpl.id)+'">excluir conta</button></span></div>':'')+'</div>':'';
+    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><span class="dot '+houseCls(h.name)+'"></span><button data-act="open" data-g="H'+esc(id)+'" aria-expanded="'+!!open+'">'+esc(h.name)+'</button></div><div class="m">'+meta+'</div></div><div class="amt num">'+BRL.format(h.amount)+'</div><span class="owners">'+btn+'</span></div>'+det+'</div>';
+  }).join("");
+  var list='<section class="card"><div class="lh"><h2>Contas de '+mname(i)+'</h2><button class="btn sm" data-act="hform">+ Conta da casa</button></div>'+(rows||'<div class="empty">Nenhuma conta neste mês.</div>')+'</section>';
+  var y12=[];for(var m=i-11;m<=i;m++)y12=y12.concat(houseFor(m).filter(function(h){return h.paid}));
+  var cats='<section class="card"><div class="ch"><h2>Quanto a casa custa</h2><span class="sub">pago nos últimos 12 meses</span></div>'+hbarsHTML(sumBy(y12,function(h){return h.name}))+'</section>';
+  return hero+chart+list+cats;
+}
+function houseFormHTML(){
+  var t=H.form.tpl,edit=!!t,first=t?mid(firstMonth(t)):mid(H.sel!=null?H.sel:nowIdx());
+  var fy=+first.slice(0,4),fm=+first.slice(5,7),ys="";for(var a=fy-3;a<=fy+2;a++)ys+='<option value="'+a+'"'+(a===fy?' selected':'')+'>'+a+'</option>';
+  var mos=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===fm?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
+  return '<div class="ov"><form class="dlg" id="hf" role="dialog" aria-modal="true" aria-label="Conta da casa"><h3>'+(edit?'Editar conta':'Nova conta da casa')+'</h3><div class="two"><label>Nome<input id="h-name" required value="'+esc(t?t.name:"")+'" placeholder="Ex.: Aluguel, Luz, Internet"></label><label>Categoria<input id="h-cat" list="hcats" value="'+esc(t?t.category:"Aluguel")+'"><datalist id="hcats">'+HOUSE_CATS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label></div><div class="two"><label>Valor previsto (R$)<input id="h-amt" required inputmode="decimal" value="'+(t?String(Math.abs(t.amount)).replace(".",","):"")+'" placeholder="0,00"></label><label>Dia do vencimento<input id="h-due" inputmode="numeric" value="'+(t&&dueDay(t)?dueDay(t):"")+'" placeholder="10"></label></div><label>Paga pela conta<input id="h-acc" list="haccs" value="'+esc(t?t.account:"Banco do Brasil")+'"><datalist id="haccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="two"><label>Começa em<select id="h-fm">'+mos+'</select></label><label>Ano<select id="h-fy">'+ys+'</select></label></div><div class="sub">Para luz, água e gás, use a média como valor previsto; ao pagar você informa o valor real do mês.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
+}
+function submitHouse(){
+  var name=$("#h-name").value.trim(),amt=parseAmount($("#h-amt").value),due=parseInt($("#h-due").value,10);
+  if(!name||isNaN(amt)||amt<=0){toast("Preencha nome e valor previsto.");return;}
+  if(!(due>=1&&due<=31))due=null;
+  var first=$("#h-fy").value+"-"+pad($("#h-fm").value);
+  var row={date:first+"-"+pad(due||1),name:name,category:$("#h-cat").value.trim()||"Outros",account:$("#h-acc").value.trim(),amount:-r2(amt),person:BASE[0],card:"",status:"Debito",parcelas:1,notes:"[conta-casa] [recorrente]"+(due?" [vencimento="+due+"]":"")+" [primeira-parcela="+first+"]"};
+  var old=H.form.tpl;
+  if(old){
+    var oldKey=normKey(old.name),pays=normKey(name)===oldKey?[]:housePayments().filter(function(p){return normKey(p.name)===oldKey});
+    var add=[row].concat(pays.map(function(p){return Object.assign({},p,{name:name})}));
+    if(commit([old].concat(pays),add)){H.form=null;toast("Conta atualizada.");}
+  }else if(commit([],[row])){H.form=null;toast("Conta gravada.");}
+  render();
+}
+function housePayFormHTML(){
+  var t=S.rows.find(function(r){return r.id===H.pay.id});if(!t)return "";
+  var i=H.pay.month,date=i===nowIdx()?todayISO():mid(i)+"-"+pad(Math.min(dueDay(t)||5,28));
+  return '<div class="ov"><form class="dlg" id="hpf" role="dialog" aria-modal="true" aria-label="Pagar conta"><h3>Pagar '+esc(t.name)+'</h3><div class="sub">'+mname(i)+'</div><div class="two"><label>Valor pago (R$)<input id="hp-amt" required inputmode="decimal" value="'+String(Math.abs(t.amount)).replace(".",",")+'"></label><label>Data do pagamento<input id="hp-date" type="date" value="'+date+'"></label></div><label>Conta<input id="hp-acc" list="haccs2" value="'+esc(t.account||"")+'"><datalist id="haccs2">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Marcar como paga</button></div></form></div>';
+}
+function submitHousePay(){
+  var t=S.rows.find(function(r){return r.id===H.pay.id});if(!t){H.pay=null;render();return;}
+  var amt=parseAmount($("#hp-amt").value);if(isNaN(amt)||amt<=0){toast("Informe o valor pago.");return;}
+  var m=mid(H.pay.month);
+  var row={date:$("#hp-date").value||todayISO(),name:t.name,category:t.category,account:$("#hp-acc").value.trim(),amount:-r2(amt),person:t.person||BASE[0],card:"",status:"Debito",parcelas:1,notes:"[conta-casa] [pago] [primeira-parcela="+m+"]"};
+  if(commit([],[row])){H.pay=null;toast(t.name+" paga.");}
+  render();
+}
+
 /* ---------- eventos ---------- */
 document.addEventListener("click",function(ev){
   var el=ev.target.closest("[data-act]");
@@ -1263,6 +1375,13 @@ document.addEventListener("click",function(ev){
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="fatura"?location.pathname:"#"+d.t)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
   if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="hform"){H.form={tpl:null};render();var hn=$("#h-name");if(hn)hn.focus();return;}
+  if(a==="hedit"){H.form={tpl:S.rows.find(function(x){return x.id===d.id})||null};render();return;}
+  if(a==="hdel"){if(el.dataset.sure){var ht=S.rows.find(function(x){return x.id===d.id});if(ht&&commit([ht],[]))toast("Conta excluída. Os pagamentos antigos continuam no histórico.");render();return;}el.dataset.sure="1";el.textContent="confirmar (os pagamentos ficam)";return;}
+  if(a==="hpay"){H.pay={id:d.id,month:H.sel};render();var ha=$("#hp-amt");if(ha){ha.focus();ha.select();}return;}
+  if(a==="hunpay"){var hh=houseFor(H.sel).find(function(h){return (h.tpl&&h.tpl.id===d.id)||(!h.tpl&&h.pays[0].id===d.id)});if(hh&&hh.pays.length&&commit(hh.pays,[]))toast("Pagamento desfeito.");render();return;}
+  if(a==="hprev"||a==="hnext"){H.sel+=a==="hnext"?1:-1;render();return;}
+  if(a==="hsel"){H.sel=+d.i;render();return;}
   if(a==="incform"){R.form=true;render();var inn=$("#i-name");if(inn)inn.focus();return;}
   if(a==="iprev"||a==="inext"){R.sel+=a==="inext"?1:-1;render();return;}
   if(a==="isel"){R.sel=+d.i;render();return;}
@@ -1314,6 +1433,8 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
+  if(id==="hf"){ev.preventDefault();submitHouse();return;}
+  if(id==="hpf"){ev.preventDefault();submitHousePay();return;}
   if(id==="incf"){ev.preventDefault();submitIncome();return;}
   if(id==="avgf"){ev.preventDefault();var av=parseAmount($("#avg-v").value);if(isNaN(av)||av<0){toast("Valor inválido.");return;}S.gabiAvg=r2(av);saveLocal();toast("Média do "+GABI+" salva.");render();return;}
   if(id==="pwf"){ev.preventDefault();var f=S.askPass&&S.askPass.file,pw=$("#pw").value;if(f)handleFile(f,pw);}
@@ -1322,7 +1443,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});

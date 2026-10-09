@@ -31,13 +31,19 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Cartões**: abas no topo separam Nubank, Itaú, C6 e Banco do Brasil (e outros cartões que estiverem na planilha), com o total do mês de cada um.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
 
+## Casa
+
+A aba **Casa** controla aluguel e contas que não são do cartão (condomínio, luz, água, internet, gás, IPTU…). Cada conta tem valor previsto e dia de vencimento e aparece todo mês; em "Pagar" você informa o valor real do mês. Contas vencidas e não pagas aparecem como atrasadas.
+
+Na aba `Lancamentos`, sem cartão: a conta fixa é uma linha com `[conta-casa] [recorrente] [vencimento=DD]` e cada pagamento é uma linha com `[conta-casa] [pago]`. Essas linhas não entram na fatura do cartão, mas entram em Gastos x Recebidos.
+
 ## Recebidos
 
 A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como linha com valor positivo na aba `Lancamentos`. "Repete todo mês" projeta o recebimento nos meses seguintes até haver um lançamento com o mesmo nome.
 
 ## Gastos x Recebidos
 
-Resumo do mês (recebido, gasto, saldo e quanto sobrou) e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, a média do Cartão Gabi e as parcelas dos empréstimos.
+Resumo do mês (recebido, gasto, saldo e quanto sobrou) e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, as contas da casa, a média do Cartão Gabi e as parcelas dos empréstimos.
 
 ## Cartão Gabi
 
