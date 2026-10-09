@@ -202,6 +202,7 @@ td .st{font-size:11px;color:var(--faint);margin-left:6px}
 <div id="toast" role="status"></div>
 <div id="drop" hidden>Solte o CSV da fatura aqui</div>
 
+<script type="module">window.FATURA_SCRIPT_URL=import.meta.env.VITE_GOOGLE_SCRIPT_URL||"";</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (function(){
@@ -354,32 +355,106 @@ function syncPeople(){
 }
 
 /* ---------- persistence ---------- */
-var root=null,dirty={},rulesDirty=false,peopleDirty=false,timer=null,chain=Promise.resolve();
+/* Cópia local no navegador + sincronização com a planilha Google (aba "Faturas")
+   pelo mesmo Apps Script do FinControl. Cada linha da aba guarda uma chave
+   ("bill:2026-10", "rules" ou "people") e o JSON correspondente. */
+var dirty={},rulesDirty=false,peopleDirty=false,timer=null,chain=Promise.resolve(),scriptUrl="",syncState="local";
 function saveLocal(){try{localStorage.setItem("fatura-gabi-v1",JSON.stringify({bills:S.bills,rules:S.rules,people:S.people.slice(BASE.length)}))}catch(e){}}
 function loadLocal(){try{var d=JSON.parse(localStorage.getItem("fatura-gabi-v1")||"null");if(d){S.bills=d.bills||{};S.rules=d.rules||{};S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));}}catch(e){}}
+function getScriptUrl(){
+  var u="";
+  try{var c=JSON.parse(localStorage.getItem("fincontrol:sheets-config")||"null");if(c&&c.scriptUrl)u=String(c.scriptUrl).trim();}catch(e){}
+  return u||String(window.FATURA_SCRIPT_URL||"").trim();
+}
+function jsonp(url,params,ms){
+  return new Promise(function(resolve,reject){
+    var cb="faturaCb"+Date.now()+Math.random().toString(36).slice(2),u=new URL(url),s=document.createElement("script"),t;
+    Object.keys(params).forEach(function(k){u.searchParams.set(k,params[k])});
+    u.searchParams.set("callback",cb);
+    var done=function(){clearTimeout(t);delete window[cb];s.remove();};
+    window[cb]=function(data){done();resolve(data)};
+    s.onerror=function(){done();reject(new Error("falha"))};
+    t=setTimeout(function(){done();reject(new Error("tempo"))},ms||10000);
+    s.src=u.toString();document.body.appendChild(s);
+  });
+}
+async function postSheet(payload){
+  await fetch(scriptUrl,{method:"POST",mode:"no-cors",headers:{"Content-Type":"application/x-www-form-urlencoded;charset=UTF-8"},body:new URLSearchParams({payload:JSON.stringify(payload)})});
+}
+function saveKey(key,value){return postSheet({action:"saveFatura",key:key,json:value==null?"":JSON.stringify(value)});}
+async function fetchSheet(){
+  var d=await jsonp(scriptUrl,{action:"listFatura"});
+  if(!d||!Array.isArray(d.rows))throw new Error("formato");
+  var out={bills:{},rules:{},people:[],count:0};
+  d.rows.forEach(function(r){
+    var k=String(r[0]||""),v;try{v=JSON.parse(r[1]||"null")}catch(e){return}
+    if(v==null)return;out.count++;
+    if(k.indexOf("bill:")===0)out.bills[k.slice(5)]=v;
+    else if(k==="rules")out.rules=v;
+    else if(k==="people")out.people=v;
+  });
+  return out;
+}
+function applySheet(d){
+  S.bills=d.bills;S.rules=d.rules;
+  S.people=BASE.concat((d.people||[]).filter(function(p){return BASE.indexOf(p)<0}));
+  saveLocal();
+}
+function markAllDirty(){Object.keys(S.bills).forEach(function(m){dirty[m]=1});rulesDirty=true;peopleDirty=true;}
 function persist(month,rules,people){
   if(month)dirty[month]=1; if(rules)rulesDirty=true; if(people)peopleDirty=true;
-  if(S.mode!=="db"){saveLocal();return;}
-  clearTimeout(timer);timer=setTimeout(function(){chain=chain.then(flush)},350);
+  saveLocal();
+  if(S.mode!=="sheet"){dirty={};rulesDirty=false;peopleDirty=false;return;}
+  clearTimeout(timer);timer=setTimeout(function(){chain=chain.then(flush)},600);
 }
+function hasPending(){return Object.keys(dirty).length>0||rulesDirty||peopleDirty;}
 async function flush(){
   var ms=Object.keys(dirty),rd=rulesDirty,pd=peopleDirty;dirty={};rulesDirty=false;peopleDirty=false;
   try{
-    for(var n=0;n<ms.length;n++){var m=ms[n],ref=root.collection("faturas").doc(m),b=S.bills[m];if(b)await ref.set(clone(b));else await ref.delete();}
-    if(rd)await root.collection("config").doc("regras").set({rules:clone(S.rules)});
-    if(pd)await root.collection("config").doc("pessoas").set({list:S.people.slice(2)});
-  }catch(e){toast("Não foi possível salvar agora. Tente de novo em instantes.");}
+    for(var n=0;n<ms.length;n++)await saveKey("bill:"+ms[n],S.bills[ms[n]]||null);
+    if(rd)await saveKey("rules",S.rules);
+    if(pd)await saveKey("people",S.people.slice(BASE.length));
+  }catch(e){
+    ms.forEach(function(m){dirty[m]=1});if(rd)rulesDirty=true;if(pd)peopleDirty=true;
+    toast("Não foi possível salvar na planilha agora. Tentando de novo…");
+    clearTimeout(timer);timer=setTimeout(function(){chain=chain.then(flush)},5000);
+  }
+}
+async function refreshFromSheet(){
+  if(S.mode!=="sheet"||hasPending()||S.pending||S.form||S.newp||S.text)return;
+  try{var d=await fetchSheet();if(hasPending())return;applySheet(d);syncPeople();if(S.sel==null||range().indexOf(S.sel)<0)S.sel=defaultSel();render();}catch(e){}
 }
 function defaultSel(){
   var ks=Object.keys(S.bills).filter(function(k){return S.bills[k].imported}).map(pm).sort(function(a,b){return b-a});
   return ks.length?ks[0]:DEFAULT_START;
 }
 function afterLoad(){S.ready=true;syncPeople();if(S.sel==null)S.sel=defaultSel();render();}
-function init(){
+async function init(){
   S.canDl=!!window.XLSX; $("#btnX").hidden=!S.canDl;
-  S.mode="local";loadLocal();note();afterLoad();
+  S.mode="local";loadLocal();
+  scriptUrl=getScriptUrl();
+  if(!scriptUrl){syncState="local";note();afterLoad();return;}
+  syncState="loading";note();
+  if(Object.keys(S.bills).length)afterLoad();else render();
+  try{
+    var d=await fetchSheet();
+    S.mode="sheet";syncState="sheet";
+    if(!d.count&&Object.keys(S.bills).length){markAllDirty();chain=chain.then(flush);}
+    else applySheet(d);
+    S.sel=null;
+  }catch(e){syncState="old";}
+  note();afterLoad();
 }
-function note(){$("#note").textContent="Salvo neste navegador. Use o backup para levar os dados para outro aparelho.";}
+function note(){
+  var t={
+    local:"Salvo neste navegador. Configure a planilha Google no FinControl para sincronizar entre aparelhos.",
+    loading:"Carregando da planilha Google…",
+    sheet:"Sincronizado com a planilha Google (aba Faturas).",
+    old:"Não consegui ler a aba Faturas da planilha. Atualize o Apps Script (veja o README). Por enquanto, salvo só neste navegador."
+  }[syncState];
+  $("#note").textContent=t;
+}
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")refreshFromSheet();});
 function saveFile(filename,data,type){
   var blob=new Blob([data],{type:type||"application/octet-stream"}),url=URL.createObjectURL(blob),a=document.createElement("a");
   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000);
@@ -395,7 +470,9 @@ async function importBackup(file){
     if(!d||typeof d.bills!=="object")throw new Error("formato");
     S.bills=d.bills||{};S.rules=d.rules||{};
     S.people=BASE.concat((d.people||d.list||[]).filter(function(p){return BASE.indexOf(p)<0}));
-    saveLocal();syncPeople();S.sel=defaultSel();S.filter="all";render();toast("Backup restaurado.");
+    markAllDirty();persist(null,false,false);
+    syncPeople();S.sel=defaultSel();S.filter="all";render();
+    toast(S.mode==="sheet"?"Backup restaurado e enviado para a planilha.":"Backup restaurado.");
   }catch(e){toast("Esse arquivo não é um backup válido.");}
 }
 
@@ -434,7 +511,7 @@ function assignAllNone(p){
 }
 function deleteBill(k){
   delete S.bills[k];
-  if(S.mode==="db"){persist(k,false);} else saveLocal();
+  persist(k,false);
   S.sel=Object.keys(S.bills).length?defaultSel():DEFAULT_START;
 }
 function cleanName(n){return String(n||"").replace(/\s+/g," ").trim().slice(0,24);}
@@ -746,7 +823,7 @@ window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#dr
 window.addEventListener("dragover",function(e){e.preventDefault();});
 window.addEventListener("drop",function(e){e.preventDefault();dc=0;$("#drop").hidden=true;var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0];if(f)handleFile(f);});
 
-init();
+document.addEventListener("DOMContentLoaded",init);
 })();
 </script>
 

@@ -62,88 +62,7 @@ Valores positivos entram como receita e normalmente usam status `Credito`. Valor
 A Google Sheets API com `VITE_GOOGLE_API_KEY` serve para ler a planilha. Para gravar novos lancamentos, crie um Web App no Google Apps Script:
 
 1. Na planilha, clique em `Extensoes > Apps Script`.
-2. Apague o conteudo inicial e cole:
-
-```javascript
-const SHEET_NAME = 'Lancamentos';
-
-function doGet(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const action = e.parameter.action;
-  const callback = e.parameter.callback;
-
-  if (action === 'listTransactions') {
-    const values = sheet.getDataRange().getValues().map((row, rowIndex) =>
-      row.map((cell, columnIndex) => {
-        if (rowIndex > 0 && columnIndex === 0 && cell instanceof Date) {
-          return Utilities.formatDate(cell, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-        }
-
-        return cell;
-      })
-    );
-    const output = JSON.stringify({ values });
-
-    if (callback) {
-      return ContentService
-        .createTextOutput(`${callback}(${output})`)
-        .setMimeType(ContentService.MimeType.JAVASCRIPT);
-    }
-
-    return ContentService
-      .createTextOutput(output)
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  return ContentService.createTextOutput('ignored');
-}
-
-function doPost(e) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
-  const payloadText = e.parameter.payload || e.postData.contents || '{}';
-  const payload = JSON.parse(payloadText);
-
-  if (payload.action === 'appendTransactions') {
-    const rows = payload.transactions || [];
-
-    if (rows.length > 0) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, 10).setValues(rows);
-    }
-
-    return ContentService.createTextOutput('ok');
-  }
-
-  if (payload.action === 'deleteTransaction') {
-    const row = Number(payload.sheetRow);
-
-    if (row > 1 && row <= sheet.getLastRow()) {
-      sheet.deleteRow(row);
-      return ContentService.createTextOutput('deleted');
-    }
-
-    const target = JSON.stringify(payload.transaction || []);
-    const values = sheet.getRange(2, 1, Math.max(sheet.getLastRow() - 1, 0), 10).getValues();
-    const index = values.findIndex((current) => JSON.stringify(current) === target);
-
-    if (index >= 0) {
-      sheet.deleteRow(index + 2);
-      return ContentService.createTextOutput('deleted');
-    }
-  }
-
-  if (payload.action === 'updateTransaction') {
-    const row = Number(payload.sheetRow);
-    const transaction = payload.transaction || [];
-
-    if (row > 1 && row <= sheet.getLastRow()) {
-      sheet.getRange(row, 1, 1, 10).setValues([transaction]);
-      return ContentService.createTextOutput('updated');
-    }
-  }
-
-  return ContentService.createTextOutput('ignored');
-}
-```
+2. Apague o conteudo inicial e cole todo o codigo do arquivo [`apps-script/Code.gs`](apps-script/Code.gs).
 
 3. Clique em `Implantar > Nova implantacao`.
 4. Tipo: `App da Web`.
@@ -157,6 +76,14 @@ VITE_GOOGLE_SCRIPT_URL = URL_DO_APPS_SCRIPT
 ```
 
 Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app tambem serao adicionados na aba `Lancamentos`, edicoes atualizarao a linha correspondente, exclusoes feitas no app tambem removerao a linha correspondente da planilha, e todos os dispositivos passarao a carregar os lancamentos direto do Apps Script.
+
+## Fatura da Gabi (rateio do cartao)
+
+A pagina `/fatura/` divide a fatura do cartao Nubank por pessoa (Gabi, Ale e Outro). Importe o CSV da fatura, escolha de quem e cada compra e veja as parcelas projetadas mes a mes.
+
+Os dados ficam na aba `Faturas` da mesma planilha, usando o mesmo Apps Script (`VITE_GOOGLE_SCRIPT_URL` ou a URL salva em `Configuracoes`). A aba e criada sozinha na primeira gravacao. Se o Apps Script ainda for a versao antiga, a pagina salva so no navegador ate ele ser atualizado.
+
+Para atualizar o Apps Script sem trocar a URL: `Implantar > Gerenciar implantacoes`, clique no lapis, escolha `Nova versao` e `Implantar`.
 
 ## Vencimentos e lembretes
 
