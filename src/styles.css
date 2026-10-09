@@ -106,6 +106,7 @@ button {
   padding: 12px;
   position: relative;
   text-align: left;
+  text-decoration: none;
 }
 
 .nav-item span {

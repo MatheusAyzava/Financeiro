@@ -3,3 +3,7 @@ dist
 .env
 .env.local
 .DS_Store
+
+# backups com dados pessoais
+fatura-gabi-backup*.json
+.claude/

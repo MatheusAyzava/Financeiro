@@ -1482,6 +1482,10 @@ function Sidebar({ activePage, setActivePage, syncStatus }) {
             {activePage === id && <small />}
           </button>
         ))}
+        <a className="nav-item" href="/fatura/">
+          <span>FG</span>
+          Fatura da Gabi
+        </a>
       </nav>
 
       <div className="sync-card">
