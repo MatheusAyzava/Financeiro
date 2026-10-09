@@ -29,6 +29,7 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Importar fatura**: escolha o arquivo da fatura (CSV, OFX, Excel, PDF, print/foto PNG ou JPG, ou ZIP, com ou sem senha) e o cartão. Dá para escolher várias imagens de uma vez. Imagens são lidas por OCR no próprio navegador. O app mostra quantas compras são novas antes de gravar.
 - **Dono de cada compra**: Matheus é fixo; as outras pessoas vêm da coluna `Quem usou`. O app sugere o dono pelas compras anteriores com o mesmo nome.
 - **Cartões**: abas no topo separam Nubank, Itaú, C6 e Banco do Brasil (e outros cartões que estiverem na planilha), com o total do mês de cada um.
+- **Fatura paga**: com um cartão selecionado, "Marcar fatura como paga" registra valor, data e conta do pagamento (linha com Valor 0 e `[fatura-paga]`, para não contar o gasto duas vezes). Em "Todos" aparece quantas faturas do mês já foram pagas e quais faltam.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
 
 ## Casa

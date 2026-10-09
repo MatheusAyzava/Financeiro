@@ -104,6 +104,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .hsec-h .num{margin-left:auto;font-weight:700;color:var(--c)}
 .empty.sm{padding:12px 0;text-align:left;font-size:13px;border-top:1px solid var(--line)}
 .tag.late{background:rgba(240,107,170,.18);color:var(--exp)}
+.paidbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
 .btn:disabled{opacity:.5;cursor:default}
@@ -786,8 +788,32 @@ function cardTabsHTML(){
   var avg=sameCard(S.card,GABI)?'<form class="avgbox" id="avgf"><span>Média mensal do '+esc(GABI)+', usada nos meses sem fatura importada:</span><input id="avg-v" inputmode="decimal" value="'+String(S.gabiAvg).replace(".",",")+'" aria-label="Média mensal"><button class="btn sm primary" type="submit">Salvar média</button></form>':'';
   return '<div class="cardtabs" role="tablist" aria-label="Cartões">'+[["all","Todos"]].concat(cards().map(function(c){return [c,c]})).map(function(c){
     var on=S.card===c[0]||(c[0]!=="all"&&S.card!=="all"&&sameCard(S.card,c[0]));
-    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+'</span></button>';
+    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+(c[0]!=="all"&&invoicePaid(c[0],i)?' · ✓ paga':'')+'</span></button>';
   }).join("")+'</div>'+avg;
+}
+/* Fatura paga: linha na aba Lancamentos com Valor 0 (para não contar o gasto duas vezes),
+   [fatura-paga] [valor-pago=X] [primeira-parcela=AAAA-MM] na observação e o cartão na coluna Cartao. */
+function invoicePaid(card,i){return S.rows.find(function(r){return /\[fatura-paga\]/.test(r.notes)&&sameCard(r.card,card)&&firstMonth(r)===i});}
+function paidValue(r){var m=r.notes.match(/\[valor-pago=([\d.]+)\]/);return m?+m[1]:0;}
+function invoiceBox(i,total){
+  if(S.card==="all"){
+    var cs=cards().filter(function(c){return cardMonthTotal(c,i)>0}),pd=cs.filter(function(c){return invoicePaid(c,i)});
+    return cs.length?'<div class="sub">'+pd.length+' de '+cs.length+' fatura'+(cs.length===1?'':'s')+' paga'+(cs.length===1?'':'s')+(cs.length>pd.length?' · falta: '+esc(cs.filter(function(c){return !invoicePaid(c,i)}).join(", ")):'')+'</div>':'';
+  }
+  var p=invoicePaid(S.card,i);
+  if(p)return '<div class="paidbox"><span class="pill paid">✓ Paga em '+esc(p.date.split("-").reverse().join("/"))+' · '+BRL.format(paidValue(p))+(p.account?' · '+esc(p.account):'')+'</span><button class="btn sm text" data-act="invunpay" data-id="'+esc(p.id)+'">desfazer</button></div>';
+  return total>0?'<div><button class="btn sm primary" data-act="invpay">Marcar fatura como paga</button></div>':'';
+}
+function invoicePayFormHTML(){
+  var p=S.invPay,date=todayISO();
+  return '<div class="ov"><form class="dlg" id="invf" role="dialog" aria-modal="true" aria-label="Pagar fatura"><h3>Fatura '+esc(p.card)+' paga</h3><div class="sub">'+mname(p.month)+' · total da fatura '+BRL.format(p.total)+'</div><div class="two"><label>Valor pago (R$)<input id="iv-amt" required inputmode="decimal" value="'+String(p.total).replace(".",",")+'"></label><label>Data do pagamento<input id="iv-date" type="date" value="'+date+'"></label></div><label>Pago pela conta<input id="iv-acc" list="ivaccs" value="Banco do Brasil"><datalist id="ivaccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="sub">O pagamento fica registrado na planilha sem somar de novo nos gastos.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Marcar como paga</button></div></form></div>';
+}
+function submitInvoicePay(){
+  var p=S.invPay,amt=parseAmount($("#iv-amt").value);
+  if(isNaN(amt)||amt<0){toast("Informe o valor pago.");return;}
+  var row={date:$("#iv-date").value||todayISO(),name:"Pagamento fatura "+p.card,category:"Pagamento de fatura",account:$("#iv-acc").value.trim(),amount:0,person:BASE[0],card:p.card,status:"Debito",parcelas:1,notes:"[fatura-paga] [valor-pago="+r2(amt)+"] [primeira-parcela="+mid(p.month)+"]"};
+  if(commit([],[row])){S.invPay=null;toast("Fatura "+p.card+" marcada como paga.");}
+  render();
 }
 function heroHTML(rm){
   var i=S.sel,es=entriesFor(i,rm),t=totals(es),real=!!rm[i];
@@ -798,7 +824,7 @@ function heroHTML(rm){
     return '<div class="person '+g.c+'"><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês</div></div>';
   }).join("");
   if(t.none>0)people+='<div class="person none"><div class="n">Sem dono</div><div class="v num">'+BRL.format(t.none)+'</div><div class="s">defina abaixo de quem é</div></div>';
-  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div></div></div><div class="people">'+people+'</div></section>';
+  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div>'+invoiceBox(i,t.total)+'</div></div><div class="people">'+people+'</div></section>';
 }
 function chartHTML(rm){
   var all=range(),data=all.map(function(i){return {i:i,t:totals(entriesFor(i,rm)),real:!!rm[i]};});
@@ -921,6 +947,7 @@ function modalHTML(){
     var defCard=S.card==="all"?"Nubank":S.card;
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
+  if(S.invPay)return invoicePayFormHTML();
   if(S.askPass){
     return '<div class="ov"><form class="dlg" id="pwf" role="dialog" aria-modal="true" aria-label="Senha do arquivo"><h3>Arquivo protegido por senha</h3><div class="sub">'+esc(S.askPass.name)+'</div><label>Senha<input id="pw" type="password" autocomplete="off" required placeholder="Geralmente os números do CPF"></label>'+(S.askPass.wrong?'<div class="warnbox">Senha incorreta. Tente de novo.</div>':"")+'<div class="sub">A senha é usada só para abrir o arquivo neste navegador; não é salva nem enviada.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Abrir</button></div></form></div>';
   }
@@ -1057,7 +1084,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1424,6 +1451,8 @@ document.addEventListener("click",function(ev){
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="fatura"?location.pathname:"#"+d.t)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
   if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="invpay"){var ti=0;entriesFor(S.sel).forEach(function(e){ti+=e.amount});S.invPay={card:S.card,month:S.sel,total:r2(ti)};render();var ia=$("#iv-amt");if(ia){ia.focus();ia.select();}return;}
+  if(a==="invunpay"){if(el.dataset.sure){var ip=S.rows.find(function(x){return x.id===d.id});if(ip&&commit([ip],[]))toast("Pagamento desfeito.");render();return;}el.dataset.sure="1";el.textContent="confirmar";return;}
   if(a==="hform"){H.form={tpl:null};render();var hn=$("#h-name");if(hn)hn.focus();return;}
   if(a==="hedit"){H.form={tpl:S.rows.find(function(x){return x.id===d.id})||null};render();return;}
   if(a==="hdel"){if(el.dataset.sure){var ht=S.rows.find(function(x){return x.id===d.id});if(ht&&commit([ht],[]))toast("Conta excluída. Os pagamentos antigos continuam no histórico.");render();return;}el.dataset.sure="1";el.textContent="confirmar (os pagamentos ficam)";return;}
@@ -1482,6 +1511,7 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
+  if(id==="invf"){ev.preventDefault();submitInvoicePay();return;}
   if(id==="hf"){ev.preventDefault();submitHouse();return;}
   if(id==="hpf"){ev.preventDefault();submitHousePay();return;}
   if(id==="incf"){ev.preventDefault();submitIncome();return;}
@@ -1492,7 +1522,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
