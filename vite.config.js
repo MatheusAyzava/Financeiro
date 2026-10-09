@@ -8,7 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
-        fatura: resolve(__dirname, 'fatura/index.html'),
+        fincontrol: resolve(__dirname, 'fincontrol/index.html'),
       },
     },
   },

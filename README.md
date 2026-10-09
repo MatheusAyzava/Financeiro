@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Depois abra o endereco exibido pelo Vite no navegador.
+Depois abra o endereco exibido pelo Vite no navegador. A pagina inicial e a Fatura da Gabi; o FinControl fica em `/fincontrol/`.
 
 ## Configurar Google Sheets pela tela do app
 
@@ -79,7 +79,7 @@ Depois faca redeploy no Netlify. A partir dai, novos lancamentos criados no app 
 
 ## Fatura da Gabi (rateio do cartao)
 
-A pagina `/fatura/` divide a fatura do cartao Nubank por pessoa (Gabi, Ale e Outro). Importe o CSV da fatura, escolha de quem e cada compra e veja as parcelas projetadas mes a mes.
+A pagina inicial (`/`) divide a fatura do cartao Nubank por pessoa (Gabi, Ale e Outro). Importe o CSV da fatura, escolha de quem e cada compra e veja as parcelas projetadas mes a mes.
 
 Os dados ficam na aba `Faturas` da mesma planilha, usando o mesmo Apps Script (`VITE_GOOGLE_SCRIPT_URL` ou a URL salva em `Configuracoes`). A aba e criada sozinha na primeira gravacao. Se o Apps Script ainda for a versao antiga, a pagina salva so no navegador ate ele ser atualizado.
 
