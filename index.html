@@ -99,6 +99,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 .toplist small{color:var(--muted);font-size:12px}
 .avgbox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--surface);border-radius:16px;padding:12px 16px;font-size:14px;color:var(--muted)}
 .avgbox input{font:inherit;color:var(--ink);background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:6px 10px;width:120px}
+.hsec+.hsec{margin-top:14px}
+.hsec-h{display:flex;align-items:center;gap:8px;padding:6px 0 8px;font-size:14px}
+.hsec-h .num{margin-left:auto;font-weight:700;color:var(--c)}
+.empty.sm{padding:12px 0;text-align:left;font-size:13px;border-top:1px solid var(--line)}
 .tag.late{background:rgba(240,107,170,.18);color:var(--exp)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .cardsel{font:inherit;font-size:12px;font-weight:600;color:var(--ink);background:var(--tile);border:1px solid var(--line);border-radius:999px;padding:3px 8px;max-width:100%}
@@ -1295,7 +1299,7 @@ function houseStatus(h,i){
   var now=nowIdx();
   if(i<now)return {t:"não paga",c:"late"};
   if(i===now&&h.due&&new Date().getDate()>h.due)return {t:"atrasada",c:"late"};
-  return {t:h.due?"vence dia "+h.due:"em aberto",c:""};
+  return {t:"em aberto",c:""};
 }
 function houseRange(){
   var now=nowIdx(),start=now-5,end=now+3;
@@ -1322,13 +1326,18 @@ function houseHTML(){
     var segs=d.hs.map(function(h){return '<i class="'+houseCls(h.name)+(h.paid?'':' pr')+'" style="height:'+Math.max(2,h.amount/mx*200)+'px" title="'+esc(h.name)+': '+BRL.format(h.amount)+(h.paid?' (paga)':' (prevista)')+'"></i>'}).join("");
     return '<button class="col'+(d.i===i?' sel':'')+'" data-act="hsel" data-i="'+d.i+'"><span class="tot num">'+(d.t?N0.format(d.t):'–')+'</span><div class="stack">'+segs+'</div><span class="lbl">'+mshort(d.i)+'</span></button>';
   }).join("")+'</div><div class="legend">'+houseTemplates().map(function(t){return '<span class="'+houseCls(t.name)+'"><i class="dot"></i>'+esc(t.name)+'</span>'}).join("")+'<span><i class="hatch"></i>Listrado = ainda não pago</span></div></section>';
-  var rows=hs.slice().sort(function(a,b){return (a.paid-b.paid)||((a.due||99)-(b.due||99))}).map(function(h){
+  var rowHTML=function(h){
     var st=houseStatus(h,i),id=h.tpl?h.tpl.id:h.pays[0].id,open=S.open["H"+id];
     var meta='<span class="tag">'+esc(h.category)+'</span>'+(h.due?'<span class="tag">vence dia '+h.due+'</span>':'')+'<span class="tag'+(st.c==="late"?' late':'')+(st.c==="ok"?' on':'')+'">'+st.t+'</span>'+(h.paid&&h.tpl&&Math.abs(h.amount-h.expected)>0.009?'<span class="tag">previsto '+BRL.format(h.expected)+'</span>':'');
     var btn=h.paid?'<button class="o cinc on" data-act="hunpay" data-id="'+esc(id)+'" title="Desfazer pagamento">Paga ✓</button>':'<button class="o" data-act="hpay" data-id="'+esc(id)+'">Pagar</button>';
     var det=open?'<div class="det">'+h.pays.map(function(p){return '<div><span class="dn">Pago em '+esc(p.date.split("-").reverse().join("/"))+(p.account?' · '+esc(p.account):'')+'</span><span class="da num">'+BRL.format(Math.abs(p.amount))+'</span></div>'}).join("")+(h.tpl?'<div><span class="dn">Valor previsto '+BRL.format(h.expected)+(h.tpl.account?' · paga pela conta '+esc(h.tpl.account):'')+'</span><span class="da"><button data-act="hedit" data-id="'+esc(h.tpl.id)+'">editar conta</button><button data-act="hdel" data-id="'+esc(h.tpl.id)+'">excluir conta</button></span></div>':'')+'</div>':'';
     return '<div class="grp"><div class="row"><div class="nm"><div class="t"><span class="dot '+houseCls(h.name)+'"></span><button data-act="open" data-g="H'+esc(id)+'" aria-expanded="'+!!open+'">'+esc(h.name)+'</button></div><div class="m">'+meta+'</div></div><div class="amt num">'+BRL.format(h.amount)+'</div><span class="owners">'+btn+'</span></div>'+det+'</div>';
-  }).join("");
+  };
+  /* Pagas em cima; abaixo, as que faltam pagar, por dia de vencimento. */
+  var byDue=function(a,b){return (a.due||99)-(b.due||99)};
+  var paidL=hs.filter(function(h){return h.paid}).sort(byDue),openL=hs.filter(function(h){return !h.paid}).sort(byDue);
+  var block=function(title,cls,list,empty){return '<div class="hsec"><div class="hsec-h '+cls+'"><span class="dot"></span><b>'+title+'</b><span class="tag">'+list.length+'</span><span class="num">'+BRL.format(r2(list.reduce(function(a,h){return a+h.amount},0)))+'</span></div>'+(list.length?list.map(rowHTML).join(""):'<div class="empty sm">'+empty+'</div>')+'</div>';};
+  var rows=hs.length?block("Pagas","cinc",paidL,"Nenhuma paga ainda neste mês.")+block("Faltam pagar","cexp",openL,"Tudo pago neste mês."):"";
   var list='<section class="card"><div class="lh"><h2>Contas de '+mname(i)+'</h2><button class="btn sm" data-act="hform">+ Conta da casa</button></div>'+(rows||'<div class="empty">Nenhuma conta neste mês.</div>')+'</section>';
   var y12=[];for(var m=i-11;m<=i;m++)y12=y12.concat(houseFor(m).filter(function(h){return h.paid}));
   var cats='<section class="card"><div class="ch"><h2>Quanto a casa custa</h2><span class="sub">pago nos últimos 12 meses</span></div>'+hbarsHTML(sumBy(y12,function(h){return h.name}))+'</section>';
