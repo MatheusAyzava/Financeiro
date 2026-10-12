@@ -491,6 +491,8 @@ function guessCard(name){
   if(/itau/.test(k))return "Itaú";
   if(/\bc6\b|c6bank/.test(k))return "C6";
   if(/\bbb\b|banco do brasil|ourocard/.test(k))return "Banco do Brasil";
+  if(/carrefour|\bcsf\b/.test(k))return "Carrefour";
+  if(/atacadao/.test(k))return "Atacadão";
   return S.card==="all"?"Nubank":S.card;
 }
 /* PDF: lê o texto com pdf.js (carregado só quando precisa) e reconhece linhas "data · descrição · valor". */
@@ -574,7 +576,7 @@ function instValue(r){var v=Math.abs(r.amount);return /\[valor-total\]/.test(r.n
 function isRec(r){return /\[recorrente\]/.test(r.notes);}
 function setMarker(notes,marker,on){notes=notes.split(marker).join("").replace(/\s+/g," ").trim();return on?(notes+" "+marker).trim():notes;}
 var GABI="Cartão Gabi";
-var CARDS=["Nubank","Itaú","C6","Banco do Brasil",GABI];
+var CARDS=["Nubank","Itaú","C6","Banco do Brasil","Carrefour","Atacadão",GABI];
 function sameCard(a,b){return normKey(a||"")===normKey(b||"");}
 function cards(){var c=CARDS.slice();S.rows.forEach(function(r){if(r.amount<0&&r.card&&!c.some(function(x){return sameCard(x,r.card)}))c.push(r.card)});return c;}
 function cardName(n){return cards().find(function(c){return sameCard(c,n)})||n;}
