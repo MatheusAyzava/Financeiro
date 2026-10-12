@@ -824,17 +824,19 @@ function planImport(p,card){
   var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0,pays=0,payDup=0,paySum=0;
   S.rows.forEach(function(r){if(r.amount<0&&sameCard(r.card,card)){var s=rowSig(r);have[s]=(have[s]||0)+1;}});
   /* "Pagamento recebido" do arquivo vira pagamento da fatura (abate do que falta); já registrado não entra de novo */
-  var havePay={};invoicePays(card,month).forEach(function(r){var k=r.date+"|"+paidValue(r).toFixed(2);havePay[k]=(havePay[k]||0)+1;});
-  /* Pagamentos feitos antes do "valor pendente do mês anterior" pagaram a fatura passada:
-     o que sobrou dela já está nesse saldo, então não abatem de novo. */
+  /* Fatura com "valor pendente do mês anterior" (Nubank): os pagamentos feitos antes dessa linha pagaram a
+     fatura passada e o que sobrou já está no saldo, então não abatem de novo; os de depois abatem desta fatura.
+     Fatura sem essa linha (Carrefour, Atacadão, Itaú…): os pagamentos listados quitam a fatura do mês anterior. */
   var carryDate=p.items.filter(function(x){return !x.ignored&&/valor pendente|saldo pendente|saldo anterior|pendente do m[eê]s anterior/i.test(x.name)}).map(function(x){return x.date}).sort()[0]||"",prevPays=0;
+  var payMonth=carryDate?month:month-1;
+  var havePay={};invoicePays(card,payMonth).forEach(function(r){var k=r.date+"|"+paidValue(r).toFixed(2);havePay[k]=(havePay[k]||0)+1;});
   p.items.forEach(function(x){
     if(x.payment){
       var v=r2(Math.abs(x.amount)),k=x.date+"|"+v.toFixed(2);
       if(carryDate&&x.date&&x.date<carryDate){prevPays++;return;}
       if(havePay[k]){havePay[k]--;payDup++;return;}
       pays++;paySum=r2(paySum+v);
-      add.push({date:x.date||mid(month)+"-01",name:"Pagamento fatura "+card,category:"Pagamento de fatura",account:"",amount:0,person:BASE[0],card:card,status:"Debito",parcelas:1,notes:"[fatura-paga] [valor-pago="+v+"] [primeira-parcela="+mid(month)+"]"});
+      add.push({date:x.date||mid(month)+"-01",name:"Pagamento fatura "+card,category:"Pagamento de fatura",account:"",amount:0,person:BASE[0],card:card,status:"Debito",parcelas:1,notes:"[fatura-paga] [valor-pago="+v+"] [primeira-parcela="+mid(payMonth)+"]"});
       return;
     }
     if(x.ignored)return;
@@ -846,7 +848,7 @@ function planImport(p,card){
     var alias=prev&&prev.r.notes.indexOf("[lembrar-nome]")>-1&&normKey(prev.r.name)!==x.key?" [nome-original="+x.name.replace(/[\[\]]/g,"")+"] [lembrar-nome]":"";
     add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+alias});
   });
-  return {add:add,dup:dup,pays:pays,payDup:payDup,paySum:paySum,prevPays:prevPays,buys:add.length-pays};
+  return {add:add,dup:dup,pays:pays,payDup:payDup,paySum:paySum,prevPays:prevPays,payMonth:payMonth,payPrev:payMonth!==month,buys:add.length-pays};
 }
 
 /* ---------- tela ---------- */
@@ -994,7 +996,7 @@ function listHTML(rm){
   }).join("");
   if(!order.length)rows='<div class="empty">Nenhum lançamento neste filtro.</div>';
   var pdl=isP(f)&&counts[f]>0?'<button class="btn sm primary" data-act="pxlsx" data-p="'+esc(f)+'">Baixar lista de '+esc(f)+'</button><button class="btn sm" data-act="pcopy" data-p="'+esc(f)+'">Copiar texto</button>':'';
-  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
+  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="mklist">Gerar lista</button><button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
   return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div></section>';
 }
 /* Últimas importações: dá para mudar o cartão de tudo que veio num arquivo ou desfazer a importação. */
@@ -1079,7 +1081,7 @@ function modalHTML(){
     var y=+p.month.slice(0,4),mo=+p.month.slice(5,7);
     var ys="";for(var a=y-2;a<=y+2;a++)ys+='<option value="'+a+'"'+(a===y?' selected':'')+'>'+a+'</option>';
     var ms=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===mo?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label>'+(p.detected&&!sameCard(p.card,p.detected)?'<div class="warnbox">Esse arquivo parece ser do cartão <b>'+esc(p.detected)+'</b>, mas está escolhido <b>'+esc(p.card)+'</b>. Confira antes de gravar.</div>':(p.detected?'<div class="sub">Cartão reconhecido pelo arquivo: '+esc(p.detected)+'.</div>':''))+'<div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.buys+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Pagamentos que abatem a fatura</span><span class="num">'+plan.pays+(plan.pays?' · '+BRL.format(plan.paySum):'')+(plan.payDup?' (+'+plan.payDup+' já registrado'+(plan.payDup===1?'':'s')+')':'')+'</span>'+(plan.prevPays?'<span>Pagamentos da fatura anterior (já descontados no valor pendente)</span><span class="num">'+plan.prevPays+'</span>':'')+'<span>Fora da conta (créditos, estornos)</span><span class="num">'+ig.filter(function(x){return !x.payment}).length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label>'+(p.detected&&!sameCard(p.card,p.detected)?'<div class="warnbox">Esse arquivo parece ser do cartão <b>'+esc(p.detected)+'</b>, mas está escolhido <b>'+esc(p.card)+'</b>. Confira antes de gravar.</div>':(p.detected?'<div class="sub">Cartão reconhecido pelo arquivo: '+esc(p.detected)+'.</div>':''))+'<div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.buys+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>'+(plan.payPrev?'Pagamentos da fatura anterior (vão para '+mshort(plan.payMonth)+')':'Pagamentos que abatem a fatura')+'</span><span class="num">'+plan.pays+(plan.pays?' · '+BRL.format(plan.paySum):'')+(plan.payDup?' (+'+plan.payDup+' já registrado'+(plan.payDup===1?'':'s')+')':'')+'</span>'+(plan.prevPays?'<span>Pagamentos da fatura anterior (já descontados no valor pendente)</span><span class="num">'+plan.prevPays+'</span>':'')+'<span>Fora da conta (créditos, estornos)</span><span class="num">'+ig.filter(function(x){return !x.payment}).length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
   }
   if(S.form){
     var defCard=S.card==="all"?"Nubank":S.card;
@@ -1098,6 +1100,7 @@ function modalHTML(){
     var list=S.people.slice(BASE.length).map(function(p){var n=rowCount(p);return '<div class="pl"><span style="flex:1">'+esc(p)+' <span class="sub">· '+n+' compra'+(n===1?'':'s')+'</span></span>'+(n?'':'<button class="btn sm text" data-act="remp" data-p="'+esc(p)+'">Remover</button>')+'</div>'}).join("");
     return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Pessoas"><h3>Pessoas</h3><div class="sub">Você (Matheus) é fixo. As outras pessoas vêm da coluna “Quem usou” da planilha.</div>'+(list||'<div class="sub">Nenhuma outra pessoa ainda.</div>')+'<form class="pl" id="addpf"><input id="ap-name" maxlength="24" placeholder="Nome da nova pessoa" aria-label="Nome da nova pessoa"><button class="btn primary sm" type="submit">Adicionar</button></form><div class="foot"><button class="btn" data-act="cancel">Fechar</button></div></div></div>';
   }
+  if(S.list)return listFormHTML();
   if(S.text){
     return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Texto"><h3>'+esc(S.text.title)+'</h3><textarea id="txt" readonly>'+esc(S.text.body)+'</textarea><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
   }
@@ -1164,16 +1167,28 @@ function safe(s){return String(s).normalize("NFD").replace(/[̀-ͯ]/g,"").replac
 function personEntries(p){
   return entriesFor(S.sel).filter(function(e){return e.owner===p}).sort(function(a,b){return (a.date||"9999").localeCompare(b.date||"9999")||b.amount-a.amount});
 }
+function entriesForCard(i,card){var k=S.card;S.card=card;try{return entriesFor(i)}finally{S.card=k;}}
+/* Lista para mandar para a pessoa: todos os cartões do mês, item a item, total por cartão e total geral. */
 function personText(p){
-  var es=personEntries(p),g={},order=[],tot=0;
-  es.forEach(function(e){var k=gidOf(e);if(!g[k]){g[k]={name:e.name,cur:e.cur,total:e.total,n:0,sum:0};order.push(k);}g[k].n++;g[k].sum+=e.amount;tot+=e.amount;});
-  var L=["Fatura do cartão","Referente a "+mname(S.sel)+" — "+p,""];
-  order.forEach(function(k){var x=g[k];L.push("• "+x.name+(x.total?" ("+x.cur+"/"+x.total+")":"")+(x.n>1?" ×"+x.n:"")+" — "+BRL.format(r2(x.sum)));});
-  L.push("","Total: "+BRL.format(r2(tot)));
-  var next=[];
-  for(var i=S.sel+1;i<=S.sel+3;i++){var v=totals(entriesFor(i)).by[p];if(v>0)next.push(mshort(i)+" "+BRL.format(v));}
-  if(next.length)L.push("","Próximos meses (previsão): "+next.join(" · "));
+  var i=S.sel,L=[],grand=0;
+  cards().forEach(function(c){
+    var es=entriesForCard(i,c).filter(function(e){return e.row&&e.owner===p&&sameCard(e.row.card,c)});
+    if(!es.length)return;
+    var g={},order=[],tot=0;
+    es.forEach(function(e){var k=gidOf(e);if(!g[k]){g[k]={name:e.name,cur:e.cur,total:e.total,n:0,sum:0};order.push(k);}g[k].n++;g[k].sum+=e.amount;tot+=e.amount;});
+    if(L.length)L.push("","—","");
+    L.push(c);
+    order.forEach(function(k){var x=g[k];L.push("• "+x.name+" — "+BRL.format(r2(x.sum))+(x.total?" ("+x.cur+"/"+x.total+")":"")+(x.n>1?" ×"+x.n:""));});
+    L.push("","Total "+c+": "+BRL.format(r2(tot)));
+    grand+=tot;
+  });
+  if(!L.length)return "Nada de "+p+" nas faturas de "+mname(i)+".";
+  L.push("","—","","TOTAL GERAL: "+BRL.format(r2(grand)));
   return L.join("\n");
+}
+function listFormHTML(){
+  var p=S.list.p;
+  return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Lista para enviar"><h3>Lista para enviar</h3><div class="two"><label>Pessoa<select id="lp-sel">'+S.people.map(function(x){return '<option'+(x===p?' selected':'')+'>'+esc(x)+'</option>'}).join("")+'</select></label><label>Mês<input value="'+esc(mname(S.sel))+'" readonly></label></div><textarea id="txt" readonly>'+esc(personText(p))+'</textarea><div class="sub">Todos os cartões do mês. Para mudar o mês, feche e troque o mês na fatura.</div><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
 }
 function copyPerson(p){
   var txt=personText(p),show=function(){S.text={title:"Texto da fatura — "+p,body:txt};render();var t=$("#txt");if(t){t.focus();t.select();}};
@@ -1226,7 +1241,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){S.carry=null;S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.list=null;S.carry=null;S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1627,6 +1642,7 @@ document.addEventListener("click",function(ev){
   if(a==="xlsx"){exportXlsx();return;}
   if(a==="pxlsx"){exportPerson(d.p);return;}
   if(a==="pcopy"){copyPerson(d.p);return;}
+  if(a==="mklist"){var lp=isP(S.filter)?S.filter:null;if(!lp){var ent=entriesForCard(S.sel,"all");lp=S.people.find(function(x){return BASE.indexOf(x)<0&&ent.some(function(e){return e.owner===x})})||BASE[0];}S.list={p:lp};render();return;}
   if(a==="copytxt"){var t=$("#txt");if(t){t.select();try{navigator.clipboard.writeText(t.value).then(function(){toast("Texto copiado.")},function(){toast("Selecione o texto e copie.")});}catch(e){toast("Selecione o texto e copie.");}}return;}
   if(a==="prev"||a==="next"){var all=range(),n=S.sel+(a==="next"?1:-1);if(n>=all[0]&&n<=all[all.length-1]){S.sel=n;S.filter="all";S.scroll=null;render();}return;}
   if(a==="sel"){S.sel=+d.i;S.filter="all";render();window.scrollTo&&window.scrollTo({top:0,behavior:"smooth"});return;}
@@ -1655,6 +1671,7 @@ document.addEventListener("change",function(ev){
     S.pending.card=($("#imp-card").value||"").trim()||"Nubank";
     render();return;
   }
+  if(t.id==="lp-sel"&&S.list){S.list.p=t.value;render();return;}
   if(t.id==="m-kind"){$("#m-par").hidden=t.value!=="parcelado";}
 });
 document.addEventListener("submit",function(ev){
@@ -1672,7 +1689,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.carry||S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.list||S.carry||S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});

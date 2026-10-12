@@ -30,11 +30,12 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Dono de cada compra**: Matheus é fixo; as outras pessoas vêm da coluna `Quem usou`. O app sugere o dono pelas compras anteriores com o mesmo nome.
 - **Cartões**: abas no topo separam Nubank, Itaú, C6, Banco do Brasil, Carrefour, Atacadão e Cartão Gabi (e outros cartões que estiverem na planilha), com o total do mês de cada um.
 - **Pagamento da fatura**: com um cartão selecionado, "Registrar pagamento da fatura" grava valor, data e conta (linha com Valor 0 e `[fatura-paga]`, para não contar o gasto duas vezes). Pode ser parcial: o app mostra quanto falta e a fatura só fica paga quando a soma dos pagamentos cobre o total. Em "Todos" aparece quantas faturas do mês estão pagas e quanto falta.
-- **Pagamentos no arquivo**: "Pagamento recebido" (e parecidos) da fatura importada vira pagamento daquela fatura e abate do que falta. Pagamentos com data anterior ao "valor pendente do mês anterior" pagaram a fatura passada e já estão descontados nesse saldo, então não abatem de novo. Pagamentos já registrados não entram duas vezes.
+- **Pagamentos no arquivo**: em fatura com "valor pendente do mês anterior" (Nubank), os pagamentos feitos depois dessa linha abatem desta fatura e os de antes já estão descontados no saldo. Em fatura sem essa linha (Carrefour, Atacadão, Itaú…), os pagamentos listados quitam a fatura do mês anterior e são registrados nela. Pagamentos já registrados não entram duas vezes.
 - **Cartão certo**: o app reconhece o cartão pelo conteúdo do arquivo (cabeçalho/emissor: Carrefour, Atacadão, Nubank, Itaú, C6, Banco do Brasil) e avisa se o cartão escolhido for outro.
 - **Últimas importações**: cada importação fica marcada (`[imp=...]`); na aba Fatura dá para mudar o cartão de tudo que veio daquele arquivo ou desfazer a importação.
 - **Renomear**: o botão "renomear" em cada compra muda o nome na planilha e guarda o nome da fatura em `[nome-original=...]`, para reimportar sem duplicar. Com "Usar esse nome nas próximas faturas", as compras com o mesmo nome original já entram renomeadas.
 - **Valor pendente do mês anterior (rotativo)**: entra na fatura com categoria "Rotativo" e `[pendente-anterior]`, soma no total e no que falta pagar, mas não entra em Gastos x Recebidos (já foi gasto no mês anterior). Se o arquivo do banco não trouxer essa linha, use "+ Saldo da fatura anterior" com o cartão selecionado. Cobranças como "IOF Rotativo" continuam contando como gasto.
+- **Gerar lista**: monta o texto para mandar para uma pessoa com todos os cartões do mês (item, valor, parcela), total por cartão e total geral, pronto para copiar.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
 
 ## Casa
