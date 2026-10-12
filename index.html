@@ -386,7 +386,8 @@ function buildItems(rows){
   items=items.filter(function(i){return !i.cur||firstInst[i.key+"|"+i.total+"|"+i.amount.toFixed(2)]===i;});
   var pool=[];
   items.forEach(function(i){
-    if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso|devolu/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
+    if(i.amount<0&&/pagamento|pagto|pgto/i.test(i.name)&&!/estorno|devolu|cancel/i.test(i.name)){i.ignored=true;i.payment=true;i.reason="Pagamento: abate da fatura";}
+    else if(i.amount<0){i.ignored=true;i.reason="Crédito ou pagamento"; if(/cr[eé]dito|estorno|reembolso|devolu/i.test(i.name))pool.push(Math.abs(i.amount).toFixed(2));}
     else if(i.amount===0){i.ignored=true;i.reason="Valor zerado";}
     else if(/pagamento recebido|pagamento efetuado|pagto|saldo da fatura|total da fatura/i.test(i.name)){i.ignored=true;i.reason="Saldo ou pagamento da fatura";}
   });
@@ -806,9 +807,22 @@ function renameFormHTML(){
   return '<div class="ov"><form class="dlg" id="renf" role="dialog" aria-modal="true" aria-label="Renomear"><h3>Renomear compra</h3>'+(normKey(orig)!==normKey(g.name)?'<div class="sub">Nome na fatura: '+esc(orig)+'</div>':'')+'<label>Novo nome<input id="rn-name" required maxlength="80" value="'+esc(g.name)+'"></label><label class="chk"><input type="checkbox" id="rn-mem" checked> Usar esse nome nas próximas faturas</label><div class="sub">'+(rows.length>1?'Vale para as '+rows.length+' compras deste grupo. ':'')+'A planilha guarda o nome original, então reimportar a fatura não duplica.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
 }
 function planImport(p,card){
-  var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0;
+  var month=pm(p.month),have={},last=lastByKey(),add=[],dup=0,pays=0,payDup=0,paySum=0;
   S.rows.forEach(function(r){if(r.amount<0&&sameCard(r.card,card)){var s=rowSig(r);have[s]=(have[s]||0)+1;}});
+  /* "Pagamento recebido" do arquivo vira pagamento da fatura (abate do que falta); já registrado não entra de novo */
+  var havePay={};invoicePays(card,month).forEach(function(r){var k=r.date+"|"+paidValue(r).toFixed(2);havePay[k]=(havePay[k]||0)+1;});
+  /* Pagamentos feitos antes do "valor pendente do mês anterior" pagaram a fatura passada:
+     o que sobrou dela já está nesse saldo, então não abatem de novo. */
+  var carryDate=p.items.filter(function(x){return !x.ignored&&/valor pendente|saldo pendente|saldo anterior|pendente do m[eê]s anterior/i.test(x.name)}).map(function(x){return x.date}).sort()[0]||"",prevPays=0;
   p.items.forEach(function(x){
+    if(x.payment){
+      var v=r2(Math.abs(x.amount)),k=x.date+"|"+v.toFixed(2);
+      if(carryDate&&x.date&&x.date<carryDate){prevPays++;return;}
+      if(havePay[k]){havePay[k]--;payDup++;return;}
+      pays++;paySum=r2(paySum+v);
+      add.push({date:x.date||mid(month)+"-01",name:"Pagamento fatura "+card,category:"Pagamento de fatura",account:"",amount:0,person:BASE[0],card:card,status:"Debito",parcelas:1,notes:"[fatura-paga] [valor-pago="+v+"] [primeira-parcela="+mid(month)+"]"});
+      return;
+    }
     if(x.ignored)return;
     var F=x.cur?month-(x.cur-1):month,parc=x.total||1;
     var s=x.key+"|"+x.amount.toFixed(2)+"|"+parc+"|"+F+(parc>1?"":"|"+x.date);
@@ -818,7 +832,7 @@ function planImport(p,card){
     var alias=prev&&prev.r.notes.indexOf("[lembrar-nome]")>-1&&normKey(prev.r.name)!==x.key?" [nome-original="+x.name.replace(/[\[\]]/g,"")+"] [lembrar-nome]":"";
     add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+alias});
   });
-  return {add:add,dup:dup};
+  return {add:add,dup:dup,pays:pays,payDup:payDup,paySum:paySum,prevPays:prevPays,buys:add.length-pays};
 }
 
 /* ---------- tela ---------- */
@@ -1010,11 +1024,11 @@ function cardOptions(){return '<datalist id="cardlist">'+cards().map(function(c)
 function modalHTML(){
   if(S.pending){
     var p=S.pending,plan=planImport(p,p.card),inc=p.items.filter(function(x){return !x.ignored}),tot=r2(inc.reduce(function(a,x){return a+x.amount},0));
-    var ig=p.items.filter(function(x){return x.ignored}),withOwner=plan.add.filter(function(x){return x.person}).length;
+    var ig=p.items.filter(function(x){return x.ignored}),withOwner=plan.add.filter(function(x){return x.person&&x.amount<0}).length;
     var y=+p.month.slice(0,4),mo=+p.month.slice(5,7);
     var ys="";for(var a=y-2;a<=y+2;a++)ys+='<option value="'+a+'"'+(a===y?' selected':'')+'>'+a+'</option>';
     var ms=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===mo?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label><div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.add.length+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Fora da conta (pagamentos, créditos)</span><span class="num">'+ig.length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label><div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.buys+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Pagamentos que abatem a fatura</span><span class="num">'+plan.pays+(plan.pays?' · '+BRL.format(plan.paySum):'')+(plan.payDup?' (+'+plan.payDup+' já registrado'+(plan.payDup===1?'':'s')+')':'')+'</span>'+(plan.prevPays?'<span>Pagamentos da fatura anterior (já descontados no valor pendente)</span><span class="num">'+plan.prevPays+'</span>':'')+'<span>Fora da conta (créditos, estornos)</span><span class="num">'+ig.filter(function(x){return !x.payment}).length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
   }
   if(S.form){
     var defCard=S.card==="all"?"Nubank":S.card;
@@ -1074,7 +1088,7 @@ function confirmImport(){
   if(commit([],plan.add)){
     S.sel=pm(p.month);S.filter="all";S.scroll=null;
     if(S.card!=="all"&&S.card!==p.card)S.card=p.card;
-    toast(plan.add.length+" compra"+(plan.add.length===1?"":"s")+" gravada"+(plan.add.length===1?"":"s")+" na planilha.");
+    toast((plan.buys?plan.buys+" compra"+(plan.buys===1?"":"s"):"")+(plan.buys&&plan.pays?" e ":"")+(plan.pays?plan.pays+" pagamento"+(plan.pays===1?"":"s"):"")+" gravado"+(plan.add.length===1?"":"s")+" na planilha.");
   }
   render();
 }
