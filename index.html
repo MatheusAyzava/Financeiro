@@ -107,6 +107,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .paidbox{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .dlg label.chk{flex-direction:row;align-items:center;gap:8px;font-weight:500;color:var(--ink)}
 .dlg label.chk input{width:auto;accent-color:var(--accent)}
+.impact{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.hrow.imp{grid-template-columns:minmax(0,1fr) auto}
 .pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -444,13 +446,25 @@ function dueFromLines(lines,it){
   lines.some(function(l){var m=l.match(/vencimento:?\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);if(m)it.due=m[3]+"-"+pad(m[2]);return !!m;});
   return it;
 }
+/* Cartão pelo conteúdo do arquivo (cabeçalho, emissor, seguradora), não pelas compras:
+   a fatura do Carrefour pode ter uma compra "ATACADAO 657", por exemplo. */
+function detectCard(text){
+  var t=normKey(String(text||"").slice(0,60000));
+  if(/cartao carrefour|representantes de seguro: ?carrefour|carrefour gold|carrefour mastercard|carrefour visa/.test(t))return "Carrefour";
+  if(/cartao atacadao|representantes de seguro: ?atacadao|atacadao s\.?a\b|atacadao mastercard|atacadao visa/.test(t))return "Atacadão";
+  if(/nu pagamentos|nubank/.test(t))return "Nubank";
+  if(/itaucard|banco itau|itau unibanco/.test(t))return "Itaú";
+  if(/banco c6|c6 bank|c6 s\.?a\b|c6 carbon/.test(t))return "C6";
+  if(/ourocard|banco do brasil s/.test(t))return "Banco do Brasil";
+  return null;
+}
 async function itemsFromBuffer(name,buf,password){
-  var ext=extOf(name);
+  var ext=extOf(name),it;
   if(ext==="heic"||ext==="heif")throw {msg:"Foto HEIC do iPhone não abre no navegador. Tire um print da tela ou exporte como JPG."};
-  if(IMG_EXT.indexOf(ext)>-1){var il=await imageLines(name,buf);return dueFromLines(il,buildItems(rowsFromLines(il)));}
+  if(IMG_EXT.indexOf(ext)>-1){var il=await imageLines(name,buf);it=dueFromLines(il,buildItems(rowsFromLines(il)));it.cardHint=detectCard(il.join(" "));return it;}
   if(ext==="pdf"){
     var lines=await pdfLines(buf,password);
-    return dueFromLines(lines,buildItems(rowsFromLines(lines)));
+    it=dueFromLines(lines,buildItems(rowsFromLines(lines)));it.cardHint=detectCard(lines.join(" "));return it;
   }
   if(ext==="xls"||ext==="xlsx"||ext==="xlsm"){
     if(!window.XLSX)throw {msg:"Não consegui carregar o leitor de Excel. Recarregue a página."};
@@ -459,7 +473,7 @@ async function itemsFromBuffer(name,buf,password){
     return best;
   }
   var text=decodeText(buf);
-  if(ext==="ofx"||ext==="qfx"||/OFXHEADER|<OFX>/i.test(text.slice(0,3000)))return buildItems(parseOFX(text));
+  if(ext==="ofx"||ext==="qfx"||/OFXHEADER|<OFX>/i.test(text.slice(0,3000))){it=buildItems(parseOFX(text));it.cardHint=detectCard(text.slice(0,4000));return it;}
   return buildItems(parseCSV(text));
 }
 var SUPPORTED=/\.(csv|txt|ofx|qfx|xls|xlsx|xlsm|pdf|png|jpe?g|webp|bmp|gif)$/i;
@@ -983,6 +997,26 @@ function listHTML(rm){
   var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
   return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div></section>';
 }
+/* Últimas importações: dá para mudar o cartão de tudo que veio num arquivo ou desfazer a importação. */
+function impRows(id){return S.rows.filter(function(r){return r.notes.indexOf("[imp="+id+"]")>-1});}
+function importsHTML(){
+  var ids={};
+  S.rows.forEach(function(r){var m=r.notes.match(/\[imp=([a-z0-9]+)\]/);if(m)ids[m[1]]=1;});
+  var list=Object.keys(ids).sort(function(a,b){return parseInt(b,36)-parseInt(a,36)}).slice(0,6);
+  if(!list.length)return "";
+  var rows=list.map(function(id){
+    var rs=impRows(id),cnt={},buys=0,pays=0,sum=0,months={};
+    rs.forEach(function(r){cnt[r.card]=(cnt[r.card]||0)+1;if(r.amount<0){buys++;sum+=Math.abs(r.amount);}else if(/\[fatura-paga\]/.test(r.notes))pays++;var F=firstMonth(r);if(/\[fatura-paga\]/.test(r.notes)||r.parcelas<=1)months[F]=1;});
+    var card=Object.keys(cnt).sort(function(a,b){return cnt[b]-cnt[a]})[0]||"",d=new Date(parseInt(id,36));
+    var when=pad(d.getDate())+"/"+pad(d.getMonth()+1)+" "+pad(d.getHours())+":"+pad(d.getMinutes());
+    var mlab=Object.keys(months).map(Number).sort().map(mshort).join(", ");
+    return '<div class="hrow imp"><div class="hn"><b>'+esc(card)+(mlab?' · '+mlab:'')+'</b><span>importado em '+when+' · '+buys+' compra'+(buys===1?'':'s')+(pays?' · '+pays+' pagamento'+(pays===1?'':'s'):'')+' · '+BRL.format(r2(sum))+'</span></div><div class="impact"><select class="cardsel" id="impc-'+id+'" aria-label="Novo cartão">'+cards().map(function(c){return '<option'+(sameCard(c,card)?' selected':'')+'>'+esc(c)+'</option>'}).join("")+'</select><button class="btn sm" data-act="impmove" data-id="'+id+'">Mudar cartão</button><button class="btn sm text" data-act="impundo" data-id="'+id+'">Desfazer importação</button></div></div>';
+  }).join("");
+  return '<section class="card"><div class="ch"><h2>Últimas importações</h2></div><p class="hnote">Importou no cartão errado? Escolha o cartão certo e clique em “Mudar cartão”. “Desfazer importação” apaga tudo o que veio daquele arquivo.</p><div class="hist">'+rows+'</div></section>';
+}
+function moveRowsToCard(rows,card){
+  changeRows(rows,function(r){r.card=card;if(r.amount<0)r.account=card;if(/^Pagamento fatura /.test(r.name))r.name="Pagamento fatura "+card;});
+}
 function histHTML(rm){
   var ks=Object.keys(rm).map(Number).sort(function(a,b){return b-a}).slice(0,24);
   if(!ks.length)return '';
@@ -1031,7 +1065,7 @@ function render(){
   if(!S.rows.some(function(r){return r.amount<0})){m.innerHTML=startHTML();}
   else{
     var rm=realMonths();
-    m.innerHTML=cardTabsHTML()+heroHTML(rm)+chartHTML(rm)+listHTML(rm)+histHTML(rm);
+    m.innerHTML=cardTabsHTML()+heroHTML(rm)+chartHTML(rm)+listHTML(rm)+histHTML(rm)+importsHTML();
     var p=$("#plot");
     if(p){if(first||S.scroll==null){var c=p.querySelector(".col.sel");if(c)p.scrollLeft=c.offsetLeft-p.clientWidth/2;S.scroll=p.scrollLeft;}else p.scrollLeft=S.scroll;}
   }
@@ -1045,7 +1079,7 @@ function modalHTML(){
     var y=+p.month.slice(0,4),mo=+p.month.slice(5,7);
     var ys="";for(var a=y-2;a<=y+2;a++)ys+='<option value="'+a+'"'+(a===y?' selected':'')+'>'+a+'</option>';
     var ms=MESES.map(function(n,j){return '<option value="'+(j+1)+'"'+(j+1===mo?' selected':'')+'>'+n.charAt(0).toUpperCase()+n.slice(1)+'</option>'}).join("");
-    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label><div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.buys+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Pagamentos que abatem a fatura</span><span class="num">'+plan.pays+(plan.pays?' · '+BRL.format(plan.paySum):'')+(plan.payDup?' (+'+plan.payDup+' já registrado'+(plan.payDup===1?'':'s')+')':'')+'</span>'+(plan.prevPays?'<span>Pagamentos da fatura anterior (já descontados no valor pendente)</span><span class="num">'+plan.prevPays+'</span>':'')+'<span>Fora da conta (créditos, estornos)</span><span class="num">'+ig.filter(function(x){return !x.payment}).length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
+    return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Importar fatura"><h3>Importar fatura</h3><div class="sub">'+esc(p.file)+'</div><div class="two"><label>Mês da fatura<select id="imp-m">'+ms+'</select></label><label>Ano<select id="imp-y">'+ys+'</select></label></div><label>Cartão<input id="imp-card" list="cardlist" value="'+esc(p.card)+'">'+cardOptions()+'</label>'+(p.detected&&!sameCard(p.card,p.detected)?'<div class="warnbox">Esse arquivo parece ser do cartão <b>'+esc(p.detected)+'</b>, mas está escolhido <b>'+esc(p.card)+'</b>. Confira antes de gravar.</div>':(p.detected?'<div class="sub">Cartão reconhecido pelo arquivo: '+esc(p.detected)+'.</div>':''))+'<div class="kv"><span>Compras na fatura</span><span class="num">'+inc.length+'</span><span>Total da fatura</span><span class="num">'+BRL.format(tot)+'</span><span>Novas, vão para a planilha</span><span class="num">'+plan.buys+'</span><span>Já estavam na planilha</span><span class="num">'+plan.dup+'</span><span>Novas já com dono pelas compras anteriores</span><span class="num">'+withOwner+'</span><span>Pagamentos que abatem a fatura</span><span class="num">'+plan.pays+(plan.pays?' · '+BRL.format(plan.paySum):'')+(plan.payDup?' (+'+plan.payDup+' já registrado'+(plan.payDup===1?'':'s')+')':'')+'</span>'+(plan.prevPays?'<span>Pagamentos da fatura anterior (já descontados no valor pendente)</span><span class="num">'+plan.prevPays+'</span>':'')+'<span>Fora da conta (créditos, estornos)</span><span class="num">'+ig.filter(function(x){return !x.payment}).length+'</span></div><div class="sub">Compras parceladas são gravadas uma vez só, com a primeira parcela marcada; os outros meses são calculados.</div><div class="foot"><button class="btn" data-act="cancel">Cancelar</button><button class="btn primary" data-act="confirm"'+(plan.add.length?'':' disabled')+'>'+(plan.add.length?'Gravar '+plan.add.length+' na planilha':'Nada novo para gravar')+'</button></div></div></div>';
   }
   if(S.form){
     var defCard=S.card==="all"?"Nubank":S.card;
@@ -1084,12 +1118,12 @@ async function handleFile(file,password){
       parts=parts.concat(extOf(f.name)==="zip"?await unzipAll(f,password):[{name:f.name,buf:new Uint8Array(await f.arrayBuffer())}]);
     }
     if(files.length>1)file={name:files.length+" arquivos"};
-    var items=[],due=null;
-    for(var n=0;n<parts.length;n++){var got=await itemsFromBuffer(parts[n].name,parts[n].buf,password);if(got.due)due=got.due;items=items.concat(got);}
+    var items=[],due=null,hint=null;
+    for(var n=0;n<parts.length;n++){var got=await itemsFromBuffer(parts[n].name,parts[n].buf,password);if(got.due)due=got.due;if(got.cardHint&&!hint)hint=got.cardHint;items=items.concat(got);}
     if(!items.length)throw {msg:"Não encontrei compras nesse arquivo. Confira se é a fatura do cartão."};
     var names=parts.map(function(x){return x.name}).join(", "),all=names+" "+file.name;
     S.askPass=null;
-    S.pending={file:names===file.name?file.name:file.name+" → "+names,items:items,month:due||guessMonth(all,items),card:guessCard(all)};
+    S.pending={file:names===file.name?file.name:file.name+" → "+names,items:items,month:due||guessMonth(all,items),card:hint||guessCard(all),detected:hint};
     if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(S.pending.month))S.pending.month=mid(nowIdx());
     toast("");render();
   }catch(e){
@@ -1102,6 +1136,9 @@ function confirmImport(){
   var plan=planImport(p,p.card);
   S.pending=null;
   if(!plan.add.length){render();return;}
+  /* marca a importação para poder mudar o cartão ou desfazer depois */
+  var impId=Date.now().toString(36);
+  plan.add.forEach(function(r){r.notes=(r.notes+" [imp="+impId+"]").trim();});
   if(commit([],plan.add)){
     S.sel=pm(p.month);S.filter="all";S.scroll=null;
     if(S.card!=="all"&&S.card!==p.card)S.card=p.card;
@@ -1558,6 +1595,8 @@ document.addEventListener("click",function(ev){
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="fatura"?location.pathname:"#"+d.t)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
   if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="impmove"){var ir=impRows(d.id),to=$("#impc-"+d.id).value;var mv=ir.filter(function(r){return !sameCard(r.card,to)});if(!mv.length){toast("Já está nesse cartão.");return;}moveRowsToCard(mv,to);toast(mv.length+" linha"+(mv.length===1?"":"s")+" movida"+(mv.length===1?"":"s")+" para "+to+".");render();return;}
+  if(a==="impundo"){if(el.dataset.sure){var iu=impRows(d.id);if(iu.length&&commit(iu,[]))toast("Importação desfeita.");render();return;}el.dataset.sure="1";el.textContent="confirmar (apaga "+impRows(d.id).length+" linhas)";return;}
   if(a==="carry"){S.carry={card:S.card,month:S.sel};render();var cy=$("#cy-amt");if(cy)cy.focus();return;}
   if(a==="ren"){var rg=groupRows(d.g);if(!rg.length)return;S.ren={gid:d.g,name:rg[0].name};render();var rn=$("#rn-name");if(rn){rn.focus();rn.select();}return;}
   if(a==="invpay"){var ti=0;entriesFor(S.sel).forEach(function(e){ti+=e.amount});S.invPay={card:S.card,month:S.sel,total:r2(ti)};render();var ia=$("#iv-amt");if(ia){ia.focus();ia.select();}return;}
