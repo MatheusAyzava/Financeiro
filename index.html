@@ -849,7 +849,7 @@ function cardTabsHTML(){
   var avg=sameCard(S.card,GABI)?'<form class="avgbox" id="avgf"><span>Média mensal do '+esc(GABI)+', usada nos meses sem fatura importada:</span><input id="avg-v" inputmode="decimal" value="'+String(S.gabiAvg).replace(".",",")+'" aria-label="Média mensal"><button class="btn sm primary" type="submit">Salvar média</button></form>':'';
   return '<div class="cardtabs" role="tablist" aria-label="Cartões">'+[["all","Todos"]].concat(cards().map(function(c){return [c,c]})).map(function(c){
     var on=S.card===c[0]||(c[0]!=="all"&&S.card!=="all"&&sameCard(S.card,c[0]));
-    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+BRL.format(cardMonthTotal(c[0],i))+(c[0]!=="all"?(function(st){return st.full?' · ✓ paga':st.partial?' · falta '+BRL.format(st.left):''})(invoiceStatus(c[0],i)):'')+'</span></button>';
+    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+(c[0]==="all"?BRL.format(monthLeft(i).left):(function(st){return st.full?'✓ paga':st.partial?'falta '+BRL.format(st.left):BRL.format(st.total)})(invoiceStatus(c[0],i)))+'</span></button>';
   }).join("")+'</div>'+avg;
 }
 /* Fatura paga: linha na aba Lancamentos com Valor 0 (para não contar o gasto duas vezes),
@@ -876,6 +876,23 @@ function invoiceBox(i,total){
   if(s.full)return '<div class="paidbox"><span class="pill paid">✓ Paga · '+esc(hist)+'</span><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'">desfazer</button></div>';
   if(s.partial)return '<div class="paidbox"><span class="pill part">Pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left)+'</span><button class="btn sm primary" data-act="invpay">Pagar mais</button><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'" title="'+esc(hist)+'">desfazer último</button>'+carry+'</div>';
   return '<div class="paidbox">'+(total>0?'<button class="btn sm primary" data-act="invpay">Registrar pagamento da fatura</button>':'')+carry+'</div>';
+}
+/* Depois de pagar (mesmo parcial), o número grande mostra só o que falta; o total vira detalhe. */
+function monthLeft(i){
+  var left=0,total=0,any=false;
+  cards().forEach(function(c){var st=invoiceStatus(c,i);if(st.total<=0)return;total+=st.total;left+=st.left;if(st.pays.length)any=true;});
+  return {left:r2(left),total:r2(total),any:any};
+}
+function bigTotalHTML(i,total,n){
+  var cnt=' · '+n+' lançamento'+(n===1?'':'s');
+  if(S.card==="all"){
+    var m=monthLeft(i);
+    if(m.any)return '<div class="big num">'+BRL.format(m.left)+'</div><div class="sub">falta pagar · total das faturas '+BRL.format(total)+cnt+'</div>';
+  }else{
+    var s=invoiceStatus(S.card,i,total);
+    if(s.pays.length)return '<div class="big num'+(s.full?' inc-t':'')+'">'+BRL.format(s.left)+'</div><div class="sub">'+(s.full?'fatura paga':'falta pagar')+' · fatura de '+BRL.format(total)+' · pago '+BRL.format(s.paid)+cnt+'</div>';
+  }
+  return '<div class="big num">'+BRL.format(total)+'</div><div class="sub">total do mês'+cnt+'</div>';
 }
 /* Saldo que ficou da fatura anterior (rotativo), lançado à mão quando o arquivo do banco não traz. */
 function hasCarry(card,i){return S.rows.some(function(r){return r.amount<0&&r.notes.indexOf("[pendente-anterior]")>-1&&sameCard(r.card,card)&&firstMonth(r)===i});}
@@ -910,7 +927,7 @@ function heroHTML(rm){
     return '<div class="person '+g.c+'"><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês</div></div>';
   }).join("");
   if(t.none>0)people+='<div class="person none"><div class="n">Sem dono</div><div class="v num">'+BRL.format(t.none)+'</div><div class="s">defina abaixo de quem é</div></div>';
-  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div><div class="big num">'+BRL.format(t.total)+'</div><div class="sub">total do mês · '+es.length+' lançamento'+(es.length===1?'':'s')+'</div>'+invoiceBox(i,t.total)+'</div></div><div class="people">'+people+'</div></section>';
+  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div>'+bigTotalHTML(i,t.total,es.length)+invoiceBox(i,t.total)+'</div></div><div class="people">'+people+'</div></section>';
 }
 function chartHTML(rm){
   var all=range(),data=all.map(function(i){return {i:i,t:totals(entriesFor(i,rm)),real:!!rm[i]};});
