@@ -813,7 +813,8 @@ function planImport(p,card){
     var F=x.cur?month-(x.cur-1):month,parc=x.total||1;
     var s=x.key+"|"+x.amount.toFixed(2)+"|"+parc+"|"+F+(parc>1?"":"|"+x.date);
     if(have[s]){have[s]--;dup++;return;}
-    var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r),carry=/valor pendente|saldo pendente|saldo anterior|rotativo/i.test(x.name);
+    var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r),carry=/valor pendente|saldo pendente|saldo anterior|pendente do m[eê]s anterior/i.test(x.name);
+    if(carry&&!x.cur&&hasCarry(card,month)){dup++;return;}
     var alias=prev&&prev.r.notes.indexOf("[lembrar-nome]")>-1&&normKey(prev.r.name)!==x.key?" [nome-original="+x.name.replace(/[\[\]]/g,"")+"] [lembrar-nome]":"";
     add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+alias});
   });
@@ -857,9 +858,23 @@ function invoiceBox(i,total){
   }
   var s=invoiceStatus(S.card,i,total),last=s.pays[s.pays.length-1];
   var hist=s.pays.map(function(p){return p.date.split("-").reverse().join("/")+' '+BRL.format(paidValue(p))}).join(" + ");
+  var carry=hasCarry(S.card,i)?'':'<button class="btn sm text" data-act="carry">+ Saldo da fatura anterior</button>';
   if(s.full)return '<div class="paidbox"><span class="pill paid">✓ Paga · '+esc(hist)+'</span><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'">desfazer</button></div>';
-  if(s.partial)return '<div class="paidbox"><span class="pill part">Pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left)+'</span><button class="btn sm primary" data-act="invpay">Pagar mais</button><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'" title="'+esc(hist)+'">desfazer último</button></div>';
-  return total>0?'<div><button class="btn sm primary" data-act="invpay">Registrar pagamento da fatura</button></div>':'';
+  if(s.partial)return '<div class="paidbox"><span class="pill part">Pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left)+'</span><button class="btn sm primary" data-act="invpay">Pagar mais</button><button class="btn sm text" data-act="invunpay" data-id="'+esc(last.id)+'" title="'+esc(hist)+'">desfazer último</button>'+carry+'</div>';
+  return '<div class="paidbox">'+(total>0?'<button class="btn sm primary" data-act="invpay">Registrar pagamento da fatura</button>':'')+carry+'</div>';
+}
+/* Saldo que ficou da fatura anterior (rotativo), lançado à mão quando o arquivo do banco não traz. */
+function hasCarry(card,i){return S.rows.some(function(r){return r.amount<0&&r.notes.indexOf("[pendente-anterior]")>-1&&sameCard(r.card,card)&&firstMonth(r)===i});}
+function carryFormHTML(){
+  var c=S.carry;
+  return '<div class="ov"><form class="dlg" id="carryf" role="dialog" aria-modal="true" aria-label="Saldo da fatura anterior"><h3>Saldo da fatura anterior</h3><div class="sub">'+esc(c.card)+' · entra na fatura de '+mname(c.month)+'</div><label>Valor que ficou pendente (R$)<input id="cy-amt" required inputmode="decimal" placeholder="0,00"></label><div class="sub">Soma no total desta fatura (e no que falta pagar), mas não conta em Gastos x Recebidos, porque esse dinheiro já foi gasto no mês anterior.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Adicionar</button></div></form></div>';
+}
+function submitCarry(){
+  var c=S.carry,amt=parseAmount($("#cy-amt").value);
+  if(isNaN(amt)||amt<=0){toast("Informe o valor.");return;}
+  var row={date:mid(c.month)+"-01",name:"Valor pendente do mês anterior",category:"Rotativo",account:c.card,amount:-r2(amt),person:BASE[0],card:c.card,status:"Credito",parcelas:1,notes:"[valor-parcela] [primeira-parcela="+mid(c.month)+"] [pendente-anterior]"};
+  if(commit([],[row])){S.carry=null;toast("Saldo da fatura anterior adicionado.");}
+  render();
 }
 function invoicePayFormHTML(){
   var p=S.invPay,date=todayISO(),s=invoiceStatus(p.card,p.month,p.total);
@@ -1005,6 +1020,7 @@ function modalHTML(){
     var defCard=S.card==="all"?"Nubank":S.card;
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
+  if(S.carry)return carryFormHTML();
   if(S.ren)return renameFormHTML();
   if(S.invPay)return invoicePayFormHTML();
   if(S.askPass){
@@ -1142,7 +1158,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.carry=null;S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1511,6 +1527,7 @@ document.addEventListener("click",function(ev){
   var a=el.getAttribute("data-act"),d=el.dataset;
   if(a==="tab"){S.tab=d.t;try{history.replaceState(null,"",d.t==="fatura"?location.pathname:"#"+d.t)}catch(e){}render();window.scrollTo&&window.scrollTo({top:0});return;}
   if(a==="card"){S.card=d.c;S.filter="all";S.scroll=null;saveLocal();var ra=range();if(ra.indexOf(S.sel)<0)S.sel=Math.min(Math.max(nowIdx(),ra[0]),ra[ra.length-1]);render();return;}
+  if(a==="carry"){S.carry={card:S.card,month:S.sel};render();var cy=$("#cy-amt");if(cy)cy.focus();return;}
   if(a==="ren"){var rg=groupRows(d.g);if(!rg.length)return;S.ren={gid:d.g,name:rg[0].name};render();var rn=$("#rn-name");if(rn){rn.focus();rn.select();}return;}
   if(a==="invpay"){var ti=0;entriesFor(S.sel).forEach(function(e){ti+=e.amount});S.invPay={card:S.card,month:S.sel,total:r2(ti)};render();var ia=$("#iv-amt");if(ia){ia.focus();ia.select();}return;}
   if(a==="invunpay"){if(el.dataset.sure){var ip=S.rows.find(function(x){return x.id===d.id});if(ip&&commit([ip],[]))toast("Pagamento desfeito.");render();return;}el.dataset.sure="1";el.textContent="confirmar";return;}
@@ -1572,6 +1589,7 @@ document.addEventListener("change",function(ev){
 });
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
+  if(id==="carryf"){ev.preventDefault();submitCarry();return;}
   if(id==="renf"){ev.preventDefault();var nn=$("#rn-name").value.replace(/\s+/g," ").trim();if(!nn){toast("Escreva um nome.");return;}var rr=groupRows(S.ren.gid);if(rr.length)renameRows(rr,nn,$("#rn-mem").checked);S.ren=null;toast("Compra renomeada.");render();return;}
   if(id==="invf"){ev.preventDefault();submitInvoicePay();return;}
   if(id==="hf"){ev.preventDefault();submitHouse();return;}
@@ -1584,7 +1602,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.carry||S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
