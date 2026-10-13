@@ -873,7 +873,7 @@ function planImport(p,card){
     var prev=last[x.key],rec=parc<=1&&prev&&prev.r.parcelas<=1&&isRec(prev.r),carry=/valor pendente|saldo pendente|saldo anterior|pendente do m[eê]s anterior/i.test(x.name);
     if(carry&&!x.cur&&hasCarry(card,month)){dup++;return;}
     var alias=prev&&prev.r.notes.indexOf("[lembrar-nome]")>-1&&normKey(prev.r.name)!==x.key?" [nome-original="+x.name.replace(/[\[\]]/g,"")+"] [lembrar-nome]":"";
-    add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+alias});
+    add.push({date:x.date||mid(month)+"-01",name:alias?prev.r.name:x.name,category:carry?"Rotativo":(x.category||(prev&&prev.r.category)||"Sem categoria"),account:card,amount:-x.amount,person:prev?prev.r.person:(carry?BASE[0]:""),card:card,status:"Credito",parcelas:parc,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(rec?" [recorrente]":"")+(carry?" [pendente-anterior]":"")+(/anuidade/i.test(x.name)?" [sem-parcela]":"")+alias});
   });
   return {add:add,dup:dup,pays:pays,payDup:payDup,paySum:paySum,prevPays:prevPays,payMonth:payMonth,payPrev:payMonth!==month,buys:add.length-pays};
 }
@@ -1215,7 +1215,7 @@ function personText(p){
     if(L.length)L.push("","—","");
     L.push(c);
     /* uma linha por compra, com o valor dela; parcela no fim, ex.: (1/3) */
-    es.forEach(function(e){tot+=e.amount;L.push("• "+e.name+" — "+BRL.format(e.amount)+(e.total?" ("+e.cur+"/"+e.total+")":""));});
+    es.forEach(function(e){tot+=e.amount;L.push("• "+e.name+" — "+BRL.format(e.amount)+(e.total&&e.row.notes.indexOf("[sem-parcela]")<0?" ("+e.cur+"/"+e.total+")":""));});
     L.push("","Total "+c+": "+BRL.format(r2(tot)));
     grand+=tot;
   });
