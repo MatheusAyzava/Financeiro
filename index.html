@@ -624,7 +624,7 @@ function entriesFor(i,real){
   });
   Object.keys(latestRec).forEach(function(k){push(latestRec[k].r,latestRec[k].F,{kind:"recorrente",proj:true})});
   /* Cartão Gabi: sem fatura importada no mês, entra a média mensal como estimativa. */
-  if(S.gabiAvg>0&&(S.card==="all"||sameCard(S.card,GABI))&&!out.some(function(e){return sameCard(e.row.card,GABI)}))
+  if(S.gabiAvg>0&&i>=nowIdx()&&(S.card==="all"||sameCard(S.card,GABI))&&!out.some(function(e){return sameCard(e.row.card,GABI)}))
     out.push({id:"gabi-"+i,row:null,virtual:true,F:i,name:"Cartão Gabi (média)",key:"cartao gabi (media)",amount:S.gabiAvg,cur:null,total:null,kind:"estimativa",owner:BASE[0],date:"",projected:true});
   return out;
 }
@@ -1477,6 +1477,18 @@ function spendFor(i){
   return out;
 }
 function pf(list){return R.person==="all"?list:list.filter(function(x){return x.person===R.person});}
+/* Quanto do gasto do mês já foi pago: faturas (pelos pagamentos registrados), contas da casa e parcelas de empréstimo. */
+function payBreakdown(i){
+  var pago=0;
+  cards().forEach(function(c){
+    var es=entriesForCard(i,c).filter(function(e){return !(e.row&&e.row.notes.indexOf("[pendente-anterior]")>-1)});
+    var spend=r2(es.reduce(function(a,e){return a+e.amount},0));if(spend<=0)return;
+    var st=invoiceStatus(c,i);pago+=spend-Math.min(st.left,spend);
+  });
+  houseFor(i).forEach(function(h){if(h.paid)pago+=h.amount;});
+  monthLoans(i).forEach(function(l){if(isPaid(l,i))pago+=l.inst;});
+  return r2(pago);
+}
 function summaryHTML(){
   var now=nowIdx(),all=[];for(var m=now-11;m<=now+3;m++)all.push(m);
   if(R.rsel==null||all.indexOf(R.rsel)<0)R.rsel=now;
@@ -1485,7 +1497,15 @@ function summaryHTML(){
   var cur=data[all.indexOf(i)],saldo=r2(cur.r-cur.g),rate=cur.r?Math.round(saldo/cur.r*100):0;
   var people=["all"].concat(S.people);
   var chips='<div class="chips">'+people.map(function(p){return '<button class="chip'+(R.person===p?' on':'')+'" data-act="rperson" data-p="'+esc(p)+'">'+(p==="all"?"Todos":esc(p))+'</button>'}).join("")+'</div>';
-  var kpis='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="rprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="rnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">'+(i>now?'Previsão':'Saldo do mês')+'</span><div class="big num '+(saldo>=0?'inc-t':'exp-t')+'">'+(saldo>=0?'':'−')+BRL.format(Math.abs(saldo))+'</div><div class="sub">'+(cur.r?(saldo>=0?'sobrou '+rate+'% do que entrou':'gastou '+Math.abs(rate)+'% a mais do que entrou'):'nenhum recebimento lançado neste mês')+'</div></div></div><div class="people"><div class="person cinc"><div class="n"><span class="dot"></span>Recebido</div><div class="v num">'+BRL.format(cur.r)+'</div></div><div class="person cexp"><div class="n"><span class="dot"></span>Gasto</div><div class="v num">'+BRL.format(cur.g)+'</div><div class="bar"><i style="width:'+(cur.r?Math.min(100,Math.round(cur.g/cur.r*100)):100)+'%"></i></div><div class="s">'+(cur.r?Math.round(cur.g/cur.r*100)+'% do recebido':'')+'</div></div></div></section>';
+  if(R.person==="all"){
+    var pago=Math.min(payBreakdown(i),cur.g),falta=r2(cur.g-pago),hoje=r2(cur.r-pago);
+    var pc=cur.g?Math.round(pago/cur.g*100):0;
+    var kpis='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="rprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="rnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">'+(i>now?'Previsão':'Saldo hoje')+'</span><div class="big num '+(hoje>=0?'inc-t':'exp-t')+'">'+(hoje>=0?'':'−')+BRL.format(Math.abs(hoje))+'</div><div class="sub">recebido − já pago</div><div class="sub">depois de pagar o que falta: <b class="num '+(saldo>=0?'inc-t':'exp-t')+'">'+(saldo>=0?'':'−')+BRL.format(Math.abs(saldo))+'</b></div></div></div><div class="people">'
+      +'<div class="person cinc"><div class="n"><span class="dot"></span>Recebido</div><div class="v num">'+BRL.format(cur.r)+'</div><div class="s">'+(cur.r?'':'nada lançado neste mês')+'</div></div>'
+      +'<div class="person c3"><div class="n"><span class="dot"></span>Já pago</div><div class="v num">'+BRL.format(pago)+'</div><div class="bar"><i style="width:'+pc+'%"></i></div><div class="s num">'+pc+'% do gasto do mês</div></div>'
+      +'<div class="person cexp"><div class="n"><span class="dot"></span>Falta pagar</div><div class="v num">'+BRL.format(falta)+'</div><div class="s num">de '+BRL.format(cur.g)+' gastos no mês</div></div>'
+      +'</div></section>';
+  }else var kpis='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="rprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="rnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">'+(i>now?'Previsão':'Saldo do mês')+'</span><div class="big num '+(saldo>=0?'inc-t':'exp-t')+'">'+(saldo>=0?'':'−')+BRL.format(Math.abs(saldo))+'</div><div class="sub">'+(cur.r?(saldo>=0?'sobrou '+rate+'% do que entrou':'gastou '+Math.abs(rate)+'% a mais do que entrou'):'nenhum recebimento lançado neste mês')+'</div></div></div><div class="people"><div class="person cinc"><div class="n"><span class="dot"></span>Recebido</div><div class="v num">'+BRL.format(cur.r)+'</div></div><div class="person cexp"><div class="n"><span class="dot"></span>Gasto</div><div class="v num">'+BRL.format(cur.g)+'</div><div class="bar"><i style="width:'+(cur.r?Math.min(100,Math.round(cur.g/cur.r*100)):100)+'%"></i></div><div class="s">'+(cur.r?Math.round(cur.g/cur.r*100)+'% do recebido':'')+'</div></div></div></section>';
   var mx=Math.max.apply(null,data.map(function(d){return Math.max(d.g,d.r)}).concat([1]));
   var pairs='<section class="card"><div class="ch"><h2>Recebido x Gasto</h2><div class="legend" style="margin:0"><span class="cinc"><i class="dot"></i>Recebido</span><span class="cexp"><i class="dot"></i>Gasto</span><span><i class="hatch"></i>Previsão</span></div></div><div class="plot" id="rplot">'+data.map(function(d){
     var s=r2(d.r-d.g);

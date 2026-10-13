@@ -50,11 +50,11 @@ A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como lin
 
 ## Gastos x Recebidos
 
-Resumo do mês (recebido, gasto, saldo e quanto sobrou) e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, as contas da casa, a média do Cartão Gabi e as parcelas dos empréstimos.
+Resumo do mês: recebido, já pago (faturas pelos pagamentos registrados, contas da casa pagas e parcelas de empréstimo pagas), falta pagar, saldo hoje (recebido − já pago) e saldo depois de pagar tudo; e e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, as contas da casa, a média do Cartão Gabi e as parcelas dos empréstimos.
 
 ## Cartão Gabi
 
-Nos meses sem fatura importada do `Cartão Gabi`, o app usa uma média mensal (R$ 1.000 por padrão, editável na aba do cartão). A média fica salva no navegador.
+A partir do mês atual, nos meses sem fatura importada do `Cartão Gabi`, o app usa uma média mensal (R$ 1.000 por padrão, editável na aba do cartão). A média fica salva no navegador.
 
 ## Empréstimos
 
