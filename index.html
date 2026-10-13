@@ -119,6 +119,19 @@ button{font:inherit;color:inherit;cursor:pointer}
 .ctab{min-width:132px}
 .dlg.wide{width:min(640px,100%)}
 .dlg .foot .btn{white-space:nowrap}
+.pair .es{display:flex;flex-direction:column;justify-content:flex-end;gap:1px;width:16px}
+.pair .es i{width:16px;border-radius:2px}
+.pair .es i:first-child{border-radius:6px 6px 2px 2px}
+table.acct td small{color:var(--muted);font-weight:500;margin-left:6px}
+table.acct tr.grp-h td{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding-top:14px;cursor:default}
+table.acct tbody tr{cursor:default}
+table.acct .ok{color:var(--inc);font-weight:700}
+table.acct .part{color:var(--p2);font-weight:700}
+.calc{display:flex;flex-direction:column;gap:6px;margin-top:16px;max-width:420px;margin-left:auto;font-size:15px}
+.calc div{display:flex;justify-content:space-between;gap:16px}
+.calc span{color:var(--muted)}
+.calc .eq{border-top:1px solid var(--line);padding-top:6px;font-size:17px}
+.calc .eq span{color:var(--ink);font-weight:700}
 .pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -1524,27 +1537,44 @@ function spendFor(i){
 }
 function pf(list){return R.person==="all"?list:list.filter(function(x){return x.person===R.person});}
 /* Quanto do gasto do mês já foi pago: faturas (pelos pagamentos registrados), contas da casa e parcelas de empréstimo. */
-function payBreakdown(i){
-  var pago=0;
+/* Linha a linha do mês: cada cartão, cada conta da casa e cada parcela de empréstimo, com total, pago e falta. */
+function accountRows(i){
+  var rows=[];
   cards().forEach(function(c){
     var es=entriesForCard(i,c).filter(function(e){return !(e.row&&e.row.notes.indexOf("[pendente-anterior]")>-1)});
     var spend=r2(es.reduce(function(a,e){return a+e.amount},0));if(spend<=0)return;
-    var st=invoiceStatus(c,i);pago+=spend-Math.min(st.left,spend);
+    var st=invoiceStatus(c,i),falta=r2(Math.min(st.left,spend));
+    rows.push({grp:"Cartões",name:c+(es.some(function(e){return e.virtual})?" (média)":""),total:spend,pago:r2(spend-falta),falta:falta});
   });
-  houseFor(i).forEach(function(h){if(h.paid)pago+=h.amount;});
-  monthLoans(i).forEach(function(l){if(isPaid(l,i))pago+=l.inst;});
-  return r2(pago);
+  houseFor(i).forEach(function(h){rows.push({grp:"Casa",name:h.name,total:h.amount,pago:h.paid?h.amount:0,falta:h.paid?0:h.amount,due:h.due});});
+  monthLoans(i).forEach(function(l){var p=isPaid(l,i);rows.push({grp:"Empréstimos",name:l.name,total:l.inst,pago:p?l.inst:0,falta:p?0:l.inst});});
+  return rows;
+}
+function payBreakdown(i){return r2(accountRows(i).reduce(function(a,r){return a+r.pago},0));}
+function accountHTML(i,rec){
+  var rows=accountRows(i);if(!rows.length)return "";
+  var T={total:0,pago:0,falta:0};rows.forEach(function(r){T.total+=r.total;T.pago+=r.pago;T.falta+=r.falta;});
+  T.total=r2(T.total);T.pago=r2(T.pago);T.falta=r2(T.falta);
+  var grp="",body=rows.map(function(r){
+    var h=r.grp!==grp?'<tr class="grp-h"><td colspan="4">'+esc(r.grp)+'</td></tr>':"";grp=r.grp;
+    var st=r.falta<=0.009?'<span class="ok">✓ pago</span>':(r.pago>0?'<span class="part">falta '+BRL.format(r.falta)+'</span>':BRL.format(r.falta));
+    return h+'<tr><td>'+esc(r.name)+(r.due&&r.falta>0?' <small>vence dia '+r.due+'</small>':'')+'</td><td>'+BRL.format(r.total)+'</td><td>'+(r.pago?BRL.format(r.pago):'–')+'</td><td class="'+(r.falta>0.009?'exp-t':'inc-t')+'">'+st+'</td></tr>';
+  }).join("");
+  var hoje=r2(rec-T.pago),fim=r2(hoje-T.falta),f=function(v){return (v<0?'−':'')+BRL.format(Math.abs(v))};
+  return '<section class="card"><div class="ch"><h2>Conta do mês</h2><span class="sub">'+mname(i)+'</span></div><div class="tw"><table class="num acct"><thead><tr><th>Item</th><th>Total</th><th>Já pago</th><th>Falta</th></tr></thead><tbody>'+body+'</tbody><tfoot><tr><td>Total</td><td>'+BRL.format(T.total)+'</td><td>'+BRL.format(T.pago)+'</td><td class="'+(T.falta>0.009?'exp-t':'inc-t')+'">'+BRL.format(T.falta)+'</td></tr></tfoot></table></div>'
+    +'<div class="calc num"><div><span>Recebido</span><b class="inc-t">'+BRL.format(rec)+'</b></div><div><span>− Já pago</span><b>'+BRL.format(T.pago)+'</b></div><div class="eq"><span>= Saldo hoje</span><b class="'+(hoje>=0?'inc-t':'exp-t')+'">'+f(hoje)+'</b></div><div><span>− Falta pagar</span><b class="exp-t">'+BRL.format(T.falta)+'</b></div><div class="eq"><span>= Sobra no fim do mês</span><b class="'+(fim>=0?'inc-t':'exp-t')+'">'+f(fim)+'</b></div></div></section>';
 }
 function summaryHTML(){
   var now=nowIdx(),all=[];for(var m=now-11;m<=now+3;m++)all.push(m);
   if(R.rsel==null||all.indexOf(R.rsel)<0)R.rsel=now;
   var i=R.rsel;
-  var data=all.map(function(m){var g=pf(spendFor(m)),r=pf(incomeFor(m));return {i:m,g:r2(g.reduce(function(a,x){return a+x.amount},0)),r:r2(r.reduce(function(a,x){return a+x.amount},0)),proj:m>now}});
+  var data=all.map(function(m){var g=pf(spendFor(m)),r=pf(incomeFor(m));return {i:m,g:r2(g.reduce(function(a,x){return a+x.amount},0)),r:r2(r.reduce(function(a,x){return a+x.amount},0)),p:R.person==="all"?payBreakdown(m):null,proj:m>now}});
   var cur=data[all.indexOf(i)],saldo=r2(cur.r-cur.g),rate=cur.r?Math.round(saldo/cur.r*100):0;
   var people=["all"].concat(S.people);
   var chips='<div class="chips">'+people.map(function(p){return '<button class="chip'+(R.person===p?' on':'')+'" data-act="rperson" data-p="'+esc(p)+'">'+(p==="all"?"Todos":esc(p))+'</button>'}).join("")+'<button class="btn sm primary" data-act="fullrep" style="margin-left:auto">Relatório do mês</button></div>';
   if(R.person==="all"){
-    var pago=Math.min(payBreakdown(i),cur.g),falta=r2(cur.g-pago),hoje=r2(cur.r-pago);
+    var AR=accountRows(i),pago=r2(AR.reduce(function(a,r){return a+r.pago},0)),falta=r2(AR.reduce(function(a,r){return a+r.falta},0)),hoje=r2(cur.r-pago);
+    cur.g=r2(pago+falta);saldo=r2(cur.r-cur.g);
     var pc=cur.g?Math.round(pago/cur.g*100):0;
     var kpis='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="rprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="rnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">'+(i>now?'Previsão':'Saldo hoje')+'</span><div class="big num '+(hoje>=0?'inc-t':'exp-t')+'">'+(hoje>=0?'':'−')+BRL.format(Math.abs(hoje))+'</div><div class="sub">recebido − já pago</div><div class="sub">depois de pagar o que falta: <b class="num '+(saldo>=0?'inc-t':'exp-t')+'">'+(saldo>=0?'':'−')+BRL.format(Math.abs(saldo))+'</b></div></div></div><div class="people">'
       +'<div class="person cinc"><div class="n"><span class="dot"></span>Recebido</div><div class="v num">'+BRL.format(cur.r)+'</div><div class="s">'+(cur.r?'':'nada lançado neste mês')+'</div></div>'
@@ -1553,9 +1583,9 @@ function summaryHTML(){
       +'</div></section>';
   }else var kpis='<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="rprev"'+(i<=all[0]?' disabled':'')+' aria-label="Mês anterior">‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="rnext"'+(i>=all[all.length-1]?' disabled':'')+' aria-label="Próximo mês">›</button></div><span class="pill">'+(i>now?'Previsão':'Saldo do mês')+'</span><div class="big num '+(saldo>=0?'inc-t':'exp-t')+'">'+(saldo>=0?'':'−')+BRL.format(Math.abs(saldo))+'</div><div class="sub">'+(cur.r?(saldo>=0?'sobrou '+rate+'% do que entrou':'gastou '+Math.abs(rate)+'% a mais do que entrou'):'nenhum recebimento lançado neste mês')+'</div></div></div><div class="people"><div class="person cinc"><div class="n"><span class="dot"></span>Recebido</div><div class="v num">'+BRL.format(cur.r)+'</div></div><div class="person cexp"><div class="n"><span class="dot"></span>Gasto</div><div class="v num">'+BRL.format(cur.g)+'</div><div class="bar"><i style="width:'+(cur.r?Math.min(100,Math.round(cur.g/cur.r*100)):100)+'%"></i></div><div class="s">'+(cur.r?Math.round(cur.g/cur.r*100)+'% do recebido':'')+'</div></div></div></section>';
   var mx=Math.max.apply(null,data.map(function(d){return Math.max(d.g,d.r)}).concat([1]));
-  var pairs='<section class="card"><div class="ch"><h2>Recebido x Gasto</h2><div class="legend" style="margin:0"><span class="cinc"><i class="dot"></i>Recebido</span><span class="cexp"><i class="dot"></i>Gasto</span><span><i class="hatch"></i>Previsão</span></div></div><div class="plot" id="rplot">'+data.map(function(d){
+  var pairs='<section class="card"><div class="ch"><h2>Recebido x Gasto</h2><div class="legend" style="margin:0"><span class="cinc"><i class="dot"></i>Recebido</span><span class="cexp"><i class="dot"></i>Gasto já pago</span><span><i class="hatch"></i>Gasto que falta pagar / previsão</span></div></div><div class="plot" id="rplot">'+data.map(function(d){
     var s=r2(d.r-d.g);
-    return '<button class="col'+(d.i===i?' sel':'')+'" data-act="rsel" data-i="'+d.i+'" aria-label="'+mname(d.i)+': recebido '+BRL.format(d.r)+', gasto '+BRL.format(d.g)+'"><span class="tot num '+(s>=0?'inc-t':'exp-t')+'">'+(d.r||d.g?(s>=0?'+':'−')+N0.format(Math.abs(s)):'–')+'</span><div class="pair"><i class="cinc'+(d.proj?' pr':'')+'" style="height:'+Math.max(2,d.r/mx*200)+'px" title="Recebido: '+BRL.format(d.r)+'"></i><i class="cexp'+(d.proj?' pr':'')+'" style="height:'+Math.max(2,d.g/mx*200)+'px" title="Gasto: '+BRL.format(d.g)+'"></i></div><span class="lbl">'+mshort(d.i)+'</span></button>';
+    return '<button class="col'+(d.i===i?' sel':'')+'" data-act="rsel" data-i="'+d.i+'" aria-label="'+mname(d.i)+': recebido '+BRL.format(d.r)+', gasto '+BRL.format(d.g)+'"><span class="tot num '+(s>=0?'inc-t':'exp-t')+'">'+(d.r||d.g?(s>=0?'+':'−')+N0.format(Math.abs(s)):'–')+'</span><div class="pair"><i class="cinc'+(d.proj?' pr':'')+'" style="height:'+Math.max(2,d.r/mx*200)+'px" title="Recebido: '+BRL.format(d.r)+'"></i>'+(function(){var pg=d.p==null?(d.proj?0:d.g):Math.min(d.p,d.g),fl=r2(d.g-pg);return '<span class="es" title="Gasto '+BRL.format(d.g)+' · já pago '+BRL.format(pg)+' · falta '+BRL.format(fl)+'">'+(fl>0?'<i class="cexp pr" style="height:'+Math.max(2,fl/mx*200)+'px"></i>':'')+(pg>0?'<i class="cexp" style="height:'+Math.max(2,pg/mx*200)+'px"></i>':'')+(d.g<=0?'<i class="cexp" style="height:2px"></i>':'')+'</span>'})()+'</div><span class="lbl">'+mshort(d.i)+'</span></button>';
   }).join("")+'</div><p class="hnote" style="margin-top:8px">O número em cima é o saldo do mês (recebido − gasto).</p></section>';
   /* saldo acumulado */
   var acc=0,pts=data.map(function(d){acc=r2(acc+d.r-d.g);return acc;}),mn=Math.min.apply(null,pts.concat([0])),mxv=Math.max.apply(null,pts.concat([0])),W=data.length*60,H=170,pad=16;
@@ -1578,7 +1608,7 @@ function summaryHTML(){
   var cm=months.map(function(m){var by={};pf(spendFor(m)).forEach(function(x){var k=normKey(x.category);if(topCats.indexOf(k)>-1)by[k]=(by[k]||0)+x.amount;});return {i:m,by:by,t:topCats.reduce(function(a,k){return a+(by[k]||0)},0)}});
   var cmx=Math.max.apply(null,cm.map(function(d){return d.t}).concat([1])),labels=sumBy(yr,function(x){return x.category}).slice(0,5);
   var catm='<section class="card"><div class="ch"><h2>As 5 maiores categorias, mês a mês</h2></div><div class="plot">'+cm.map(function(d){return '<div class="col'+(d.i===i?' sel':'')+'"><span class="tot num">'+(d.t?N0.format(d.t):'–')+'</span><div class="stack">'+topCats.map(function(k,n){var v=d.by[k]||0;return v>0?'<i class="c'+(n+1)+'" style="height:'+Math.max(2,v/cmx*200)+'px" title="'+esc(labels[n].label)+': '+BRL.format(v)+'"></i>':''}).join("")+'</div><span class="lbl">'+mshort(d.i)+'</span></div>'}).join("")+'</div><div class="legend">'+labels.map(function(c,n){return '<span class="c'+(n+1)+'"><i class="dot"></i>'+esc(c.label)+'</span>'}).join("")+'</div></section>';
-  return chips+kpis+pairs+accCard+'<div class="grid2">'+cat+card+'</div><div class="grid2">'+per+topC+'</div>'+catm;
+  return chips+kpis+(R.person==="all"?accountHTML(i,cur.r):"")+pairs+accCard+'<div class="grid2">'+cat+card+'</div><div class="grid2">'+per+topC+'</div>'+catm;
 }
 
 /* ---------- casa: aluguel e contas que não são do cartão ---------- */

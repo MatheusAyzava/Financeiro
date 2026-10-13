@@ -50,6 +50,8 @@ A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como lin
 
 ## Gastos x Recebidos
 
+**Conta do mês**: tabela com cada cartão, conta da casa e parcela de empréstimo (Total | Já pago | Falta) e a conta: Recebido − Já pago = Saldo hoje; Saldo hoje − Falta pagar = Sobra no fim do mês. No gráfico Recebido x Gasto, a parte cheia do gasto é o que já foi pago e a listrada é o que falta.
+
 Resumo do mês: recebido, já pago (faturas pelos pagamentos registrados, contas da casa pagas e parcelas de empréstimo pagas), falta pagar, saldo hoje (recebido − já pago) e saldo depois de pagar tudo; e e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, as contas da casa, a média do Cartão Gabi e as parcelas dos empréstimos.
 
 ## Cartão Gabi
