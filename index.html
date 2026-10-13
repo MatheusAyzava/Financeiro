@@ -826,7 +826,10 @@ function rowCount(p){return S.rows.filter(function(r){return r.amount<0&&r.perso
 /* Compra renomeada guarda o nome que veio da fatura em [nome-original=...], para reimportar sem duplicar.
    Com [lembrar-nome], as próximas faturas já entram com o nome novo. */
 function origName(r){var m=r.notes.match(/\[nome-original=([^\]]*)\]/);return m?m[1]:r.name;}
-function rowSig(r){var F=firstMonth(r);return normKey(origName(r))+"|"+instValue(r).toFixed(2)+"|"+r.parcelas+"|"+F+(r.parcelas>1?"":"|"+r.date);}
+/* Valor e primeira parcela que vieram do banco, se foram corrigidos à mão ([valor-original=...], [primeira-original=...]). */
+function origVal(r){var m=r.notes.match(/\[valor-original=([\d.]+)\]/);return m?+m[1]:instValue(r);}
+function origFirst(r){var m=r.notes.match(/\[primeira-original=(\d{4}-\d{2})\]/);return m?pm(m[1]):firstMonth(r);}
+function rowSig(r){var F=origFirst(r);return normKey(origName(r))+"|"+origVal(r).toFixed(2)+"|"+r.parcelas+"|"+F+(r.parcelas>1?"":"|"+r.date);}
 function lastByKey(){
   var m={};
   S.rows.forEach(function(r){if(r.amount>=0||!r.name)return;var k=normKey(origName(r)),F=firstMonth(r)||0;if(!m[k]||m[k].F<=F)m[k]={F:F,r:r};});
