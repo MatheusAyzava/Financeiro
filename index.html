@@ -957,7 +957,7 @@ function submitCarry(){
 }
 function invoicePayFormHTML(){
   var p=S.invPay,date=todayISO(),s=invoiceStatus(p.card,p.month,p.total);
-  return '<div class="ov"><form class="dlg" id="invf" role="dialog" aria-modal="true" aria-label="Pagar fatura"><h3>Pagamento da fatura '+esc(p.card)+'</h3><div class="sub">'+mname(p.month)+' · total '+BRL.format(p.total)+(s.paid?' · já pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left):"")+'</div><div class="two"><label>Valor pago (R$)<input id="iv-amt" required inputmode="decimal" value="'+String(s.left||p.total).replace(".",",")+'"></label><label>Data do pagamento<input id="iv-date" type="date" value="'+date+'"></label></div><label>Pago pela conta<input id="iv-acc" list="ivaccs" value="Banco do Brasil"><datalist id="ivaccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="sub">Pode ser um valor parcial: o que faltar continua aparecendo para pagar depois. O pagamento fica na planilha sem somar de novo nos gastos.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Registrar pagamento</button></div></form></div>';
+  return '<div class="ov"><form class="dlg" id="invf" role="dialog" aria-modal="true" aria-label="Pagar fatura"><h3>Pagamento da fatura '+esc(p.card)+'</h3><label>Fatura de<select id="iv-month">'+[p.month-2,p.month-1,p.month,p.month+1].map(function(m){return '<option value="'+m+'"'+(m===p.month?' selected':'')+'>'+mname(m)+' · '+BRL.format(cardMonthTotal(p.card,m))+'</option>'}).join("")+'</select></label>'+(p.month>nowIdx()?'<div class="warnbox">'+mname(p.month)+' ainda não chegou. Se esse pagamento é da fatura que você já recebeu, escolha o mês dela acima.</div>':'')+'<div class="sub">'+mname(p.month)+' · total '+BRL.format(p.total)+(s.paid?' · já pago '+BRL.format(s.paid)+' · falta '+BRL.format(s.left):"")+'</div><div class="two"><label>Valor pago (R$)<input id="iv-amt" required inputmode="decimal" value="'+String(s.left||p.total).replace(".",",")+'"></label><label>Data do pagamento<input id="iv-date" type="date" value="'+date+'"></label></div><label>Pago pela conta<input id="iv-acc" list="ivaccs" value="Banco do Brasil"><datalist id="ivaccs">'+ACCOUNTS.map(function(c){return '<option value="'+esc(c)+'">'}).join("")+'</datalist></label><div class="sub">Pode ser um valor parcial: o que faltar continua aparecendo para pagar depois. O pagamento fica na planilha sem somar de novo nos gastos.</div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Registrar pagamento</button></div></form></div>';
 }
 function submitInvoicePay(){
   var p=S.invPay,amt=parseAmount($("#iv-amt").value);
@@ -1789,6 +1789,7 @@ document.addEventListener("change",function(ev){
     S.pending.card=($("#imp-card").value||"").trim()||"Nubank";
     render();return;
   }
+  if(t.id==="iv-month"&&S.invPay){var nm=+t.value;S.invPay.month=nm;S.invPay.total=r2(cardMonthTotal(S.invPay.card,nm));render();return;}
   if(t.id==="lp-sel"&&S.list){S.list.p=t.value;render();return;}
   if(t.id==="m-kind"){$("#m-par").hidden=t.value!=="parcelado";}
 });
