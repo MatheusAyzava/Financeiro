@@ -117,6 +117,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .splitleg span{display:inline-flex;align-items:center;gap:6px;color:var(--c)}
 .splitleg b{color:var(--c)}
 .ctab{min-width:132px}
+.dlg.wide{width:min(640px,100%)}
+.dlg .foot .btn{white-space:nowrap}
 .pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -1013,7 +1015,7 @@ function listHTML(rm){
   }).join("");
   if(!order.length)rows='<div class="empty">Nenhum lançamento neste filtro.</div>';
   var pdl=isP(f)&&counts[f]>0?'<button class="btn sm primary" data-act="pxlsx" data-p="'+esc(f)+'">Baixar lista de '+esc(f)+'</button><button class="btn sm" data-act="pcopy" data-p="'+esc(f)+'">Copiar texto</button>':'';
-  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="mklist">Gerar lista</button><button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
+  var title='<div class="lh"><h2>Lançamentos de '+mname(i)+'</h2><div style="display:flex;gap:6px;flex-wrap:wrap">'+pdl+'<button class="btn sm" data-act="mklist">Relatório / lista</button><button class="btn sm" data-act="addform">+ Lançamento</button></div></div>';
   return '<section class="card">'+title+'<div class="chips">'+chips+'</div>'+banner+'<div>'+rows+'</div></section>';
 }
 /* Últimas importações: dá para mudar o cartão de tudo que veio num arquivo ou desfazer a importação. */
@@ -1203,9 +1205,53 @@ function personText(p){
   L.push("","—","","TOTAL GERAL: "+BRL.format(r2(grand)));
   return L.join("\n");
 }
+/* Relatório completo do mês: cartões (com a parte de cada pessoa), casa, empréstimos, recebidos e resumo. */
+var FULL="__todos__";
+function fullMonthText(i){
+  var L=["RELATÓRIO — "+mname(i).toUpperCase(),""],bl=function(t){if(L[L.length-1]!=="")L.push("");L.push(t);};
+  var cardTotal=0,cardLeft=0;
+  bl("CARTÕES");
+  cards().forEach(function(c){
+    var es=entriesForCard(i,c);if(!es.length)return;
+    var t=totals(es),st=invoiceStatus(c,i);
+    cardTotal+=t.total;cardLeft+=st.left;
+    L.push("• "+c+": "+BRL.format(t.total)+(st.full?" (paga)":st.partial?" (pago "+BRL.format(st.paid)+", falta "+BRL.format(st.left)+")":" (em aberto)")+(es.some(function(e){return e.virtual})?" — média estimada":""));
+    var parts=groups(t).filter(function(g){return g.v>0}).map(function(g){return g.n+" "+BRL.format(g.v)});
+    if(t.none>0)parts.push("Sem dono "+BRL.format(t.none));
+    if(parts.length>1||(parts.length===1&&parts[0].indexOf(BASE[0])!==0))L.push("   "+parts.join(" · "));
+  });
+  L.push("Total cartões: "+BRL.format(r2(cardTotal))+(cardLeft>0?" · falta pagar "+BRL.format(r2(cardLeft)):""));
+  var hs=houseFor(i);
+  if(hs.length){
+    bl("CASA");
+    hs.forEach(function(h){L.push("• "+h.name+": "+BRL.format(h.amount)+(h.paid?" (paga)":(h.due?" (vence dia "+h.due+")":" (em aberto)")));});
+    L.push("Total casa: "+BRL.format(r2(hs.reduce(function(a,h){return a+h.amount},0))));
+  }
+  var ls=monthLoans(i);
+  if(ls.length){
+    bl("EMPRÉSTIMOS");
+    ls.forEach(function(l){var k=i-pm(l.first)+1;L.push("• "+l.name+": "+BRL.format(l.inst)+" ("+k+"/"+l.n+")"+(isPaid(l,i)?" (paga)":" (em aberto)"));});
+  }
+  var inc=incomeFor(i);
+  if(inc.length){
+    bl("RECEBIDOS");
+    inc.forEach(function(e){L.push("• "+e.name+": "+BRL.format(e.amount)+(e.projected?" (previsto)":""));});
+  }
+  var g=r2(spendFor(i).reduce(function(a,x){return a+x.amount},0)),r=r2(inc.reduce(function(a,e){return a+e.amount},0)),pago=Math.min(payBreakdown(i),g);
+  bl("RESUMO");
+  L.push("Recebido: "+BRL.format(r),"Gasto: "+BRL.format(g),"Já pago: "+BRL.format(r2(pago)),"Falta pagar: "+BRL.format(r2(g-pago)),"Saldo hoje: "+BRL.format(r2(r-pago)),"Depois de pagar tudo: "+BRL.format(r2(r-g)));
+  return L.join("\n");
+}
+function reportText(){return S.list.p===FULL?fullMonthText(S.sel):personText(S.list.p);}
 function listFormHTML(){
   var p=S.list.p;
-  return '<div class="ov"><div class="dlg" role="dialog" aria-modal="true" aria-label="Lista para enviar"><h3>Lista para enviar</h3><div class="two"><label>Pessoa<select id="lp-sel">'+S.people.map(function(x){return '<option'+(x===p?' selected':'')+'>'+esc(x)+'</option>'}).join("")+'</select></label><label>Mês<input value="'+esc(mname(S.sel))+'" readonly></label></div><textarea id="txt" readonly>'+esc(personText(p))+'</textarea><div class="sub">Todos os cartões do mês. Para mudar o mês, feche e troque o mês na fatura.</div><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
+  return '<div class="ov"><div class="dlg wide" role="dialog" aria-modal="true" aria-label="Relatório para enviar"><h3>Relatório para enviar</h3><div class="two"><label>Para<select id="lp-sel"><option value="'+FULL+'"'+(p===FULL?' selected':'')+'>Relatório completo do mês</option>'+S.people.map(function(x){return '<option'+(x===p?' selected':'')+'>'+esc(x)+'</option>'}).join("")+'</select></label><label>Mês<input value="'+esc(mname(S.sel))+'" readonly></label></div><textarea id="txt" readonly>'+esc(reportText())+'</textarea><div class="sub">'+(p===FULL?'Tudo do mês: cartões, casa, empréstimos, recebidos e resumo.':'Todos os cartões do mês com o que é de '+esc(p)+'.')+' Para outro mês, feche e troque o mês na fatura.</div><div class="foot"><button class="btn" data-act="cancel">Fechar</button><button class="btn" data-act="printrep">Imprimir / PDF</button><button class="btn" data-act="wasend">Enviar no WhatsApp</button><button class="btn primary" data-act="copytxt">Copiar</button></div></div></div>';
+}
+function printReport(){
+  var txt=reportText(),w=window.open("","_blank");
+  if(!w){toast("Libere pop-ups para imprimir.");return;}
+  w.document.write('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>'+esc((S.list.p===FULL?"Relatório":"Lista "+S.list.p)+" — "+mname(S.sel))+'</title><style>body{font:15px/1.5 -apple-system,Segoe UI,Arial,sans-serif;color:#111;margin:32px;max-width:720px}pre{white-space:pre-wrap;font:inherit;margin:0}</style></head><body><pre>'+esc(txt)+'</pre></body></html>');
+  w.document.close();w.focus();setTimeout(function(){w.print()},300);
 }
 function copyPerson(p){
   var txt=personText(p),show=function(){S.text={title:"Texto da fatura — "+p,body:txt};render();var t=$("#txt");if(t){t.focus();t.select();}};
@@ -1496,7 +1542,7 @@ function summaryHTML(){
   var data=all.map(function(m){var g=pf(spendFor(m)),r=pf(incomeFor(m));return {i:m,g:r2(g.reduce(function(a,x){return a+x.amount},0)),r:r2(r.reduce(function(a,x){return a+x.amount},0)),proj:m>now}});
   var cur=data[all.indexOf(i)],saldo=r2(cur.r-cur.g),rate=cur.r?Math.round(saldo/cur.r*100):0;
   var people=["all"].concat(S.people);
-  var chips='<div class="chips">'+people.map(function(p){return '<button class="chip'+(R.person===p?' on':'')+'" data-act="rperson" data-p="'+esc(p)+'">'+(p==="all"?"Todos":esc(p))+'</button>'}).join("")+'</div>';
+  var chips='<div class="chips">'+people.map(function(p){return '<button class="chip'+(R.person===p?' on':'')+'" data-act="rperson" data-p="'+esc(p)+'">'+(p==="all"?"Todos":esc(p))+'</button>'}).join("")+'<button class="btn sm primary" data-act="fullrep" style="margin-left:auto">Relatório do mês</button></div>';
   if(R.person==="all"){
     var pago=Math.min(payBreakdown(i),cur.g),falta=r2(cur.g-pago),hoje=r2(cur.r-pago);
     var pc=cur.g?Math.round(pago/cur.g*100):0;
@@ -1680,6 +1726,9 @@ document.addEventListener("click",function(ev){
   if(a==="pxlsx"){exportPerson(d.p);return;}
   if(a==="pcopy"){copyPerson(d.p);return;}
   if(a==="mklist"){var lp=isP(S.filter)?S.filter:null;if(!lp){var ent=entriesForCard(S.sel,"all");lp=S.people.find(function(x){return BASE.indexOf(x)<0&&ent.some(function(e){return e.owner===x})})||BASE[0];}S.list={p:lp};render();return;}
+  if(a==="fullrep"){S.sel=R.rsel;S.list={p:FULL};render();return;}
+  if(a==="printrep"){printReport();return;}
+  if(a==="wasend"){window.open("https://wa.me/?text="+encodeURIComponent(reportText()),"_blank");return;}
   if(a==="copytxt"){var t=$("#txt");if(t){t.select();try{navigator.clipboard.writeText(t.value).then(function(){toast("Texto copiado.")},function(){toast("Selecione o texto e copie.")});}catch(e){toast("Selecione o texto e copie.");}}return;}
   if(a==="prev"||a==="next"){var all=range(),n=S.sel+(a==="next"?1:-1);if(n>=all[0]&&n<=all[all.length-1]){S.sel=n;S.filter="all";S.scroll=null;render();}return;}
   if(a==="sel"){S.sel=+d.i;S.filter="all";render();window.scrollTo&&window.scrollTo({top:0,behavior:"smooth"});return;}
