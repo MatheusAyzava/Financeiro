@@ -109,6 +109,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .dlg label.chk input{width:auto;accent-color:var(--accent)}
 .impact{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .hrow.imp{grid-template-columns:minmax(0,1fr) auto}
+.split{display:flex;gap:2px;height:8px;border-radius:99px;overflow:hidden;margin:4px 0 2px;max-width:420px}
+.split.sm{height:4px;margin:4px 0 0;width:100%;background:transparent}
+.split i{display:block;min-width:3px;background:var(--c)}
+.ctab.on .split{background:rgba(0,0,0,.35);padding:1px;height:6px}
+.splitleg{display:flex;gap:6px 14px;flex-wrap:wrap;font-size:13px;font-weight:600;margin-bottom:2px}
+.splitleg span{display:inline-flex;align-items:center;gap:6px;color:var(--c)}
+.splitleg b{color:var(--c)}
+.ctab{min-width:132px}
 .pill.part{background:rgba(242,190,74,.16);color:var(--p2)}
 .pill.paid{background:rgba(79,209,165,.16);color:var(--inc)}
 .pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
@@ -865,7 +873,7 @@ function cardTabsHTML(){
   var avg=sameCard(S.card,GABI)?'<form class="avgbox" id="avgf"><span>Média mensal do '+esc(GABI)+', usada nos meses sem fatura importada:</span><input id="avg-v" inputmode="decimal" value="'+String(S.gabiAvg).replace(".",",")+'" aria-label="Média mensal"><button class="btn sm primary" type="submit">Salvar média</button></form>':'';
   return '<div class="cardtabs" role="tablist" aria-label="Cartões">'+[["all","Todos"]].concat(cards().map(function(c){return [c,c]})).map(function(c){
     var on=S.card===c[0]||(c[0]!=="all"&&S.card!=="all"&&sameCard(S.card,c[0]));
-    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+(c[0]==="all"?BRL.format(monthLeft(i).left):(function(st){return st.full?'✓ paga':st.partial?'falta '+BRL.format(st.left):BRL.format(st.total)})(invoiceStatus(c[0],i)))+'</span></button>';
+    return '<button class="ctab'+(on?' on':"")+'" role="tab" aria-selected="'+on+'" data-act="card" data-c="'+esc(c[0])+'"><b>'+esc(c[1])+'</b><span class="num">'+(c[0]==="all"?BRL.format(monthLeft(i).left):(function(st){return st.full?'✓ paga':st.partial?'falta '+BRL.format(st.left):BRL.format(st.total)})(invoiceStatus(c[0],i)))+'</span>'+splitHTML(totals(entriesForCard(i,c[0])),false)+'</button>';
   }).join("")+'</div>'+avg;
 }
 /* Fatura paga: linha na aba Lancamentos com Valor 0 (para não contar o gasto duas vezes),
@@ -898,6 +906,15 @@ function monthLeft(i){
   var left=0,total=0,any=false;
   cards().forEach(function(c){var st=invoiceStatus(c,i);if(st.total<=0)return;total+=st.total;left+=st.left;if(st.pays.length)any=true;});
   return {left:r2(left),total:r2(total),any:any};
+}
+/* Valor dividido pelas cores de quem usou (Matheus, Alessandra…; cinza = sem dono). */
+function splitHTML(t,legend){
+  var parts=groups(t).filter(function(g){return g.v>0});
+  if(t.none>0)parts.push({n:"Sem dono",c:"c0",v:t.none});
+  if(!parts.length||t.total<=0)return legend?"":'<div class="split sm"></div>';
+  var bar='<div class="split'+(legend?"":" sm")+'">'+parts.map(function(g){return '<i class="'+g.c+'" style="flex:'+g.v+'" title="'+esc(g.n)+': '+BRL.format(g.v)+'"></i>'}).join("")+'</div>';
+  if(!legend)return bar;
+  return bar+'<div class="splitleg">'+parts.map(function(g){return '<span class="'+g.c+'"><i class="dot"></i>'+esc(g.n)+' <b class="num">'+BRL.format(g.v)+'</b></span>'}).join("")+'</div>';
 }
 function bigTotalHTML(i,total,n){
   var cnt=' · '+n+' lançamento'+(n===1?'':'s');
@@ -943,7 +960,7 @@ function heroHTML(rm){
     return '<div class="person '+g.c+'"><div class="n"><span class="dot"></span>'+esc(g.n)+'</div><div class="v num">'+BRL.format(v)+'</div><div class="bar"><i style="width:'+pct+'%"></i></div><div class="s num">'+pct+'% do mês</div></div>';
   }).join("");
   if(t.none>0)people+='<div class="person none"><div class="n">Sem dono</div><div class="v num">'+BRL.format(t.none)+'</div><div class="s">defina abaixo de quem é</div></div>';
-  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div>'+bigTotalHTML(i,t.total,es.length)+invoiceBox(i,t.total)+'</div></div><div class="people">'+people+'</div></section>';
+  return '<section class="card hero"><div class="top2"><div class="l"><div class="nav"><button data-act="prev" aria-label="Mês anterior"'+(i<=all[0]?' disabled':'')+'>‹</button><h2 class="mtitle">'+mname(i)+'</h2><button data-act="next" aria-label="Próximo mês"'+(i>=all[all.length-1]?' disabled':'')+'>›</button></div><div class="pills"><span class="pill">'+esc(S.card==="all"?"Todos os cartões":S.card)+'</span>'+status+'</div>'+bigTotalHTML(i,t.total,es.length)+splitHTML(t,true)+invoiceBox(i,t.total)+'</div></div><div class="people">'+people+'</div></section>';
 }
 function chartHTML(rm){
   var all=range(),data=all.map(function(i){return {i:i,t:totals(entriesFor(i,rm)),real:!!rm[i]};});
