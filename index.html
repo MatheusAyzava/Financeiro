@@ -1120,6 +1120,7 @@ function modalHTML(){
     return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
   if(S.carry)return carryFormHTML();
+  if(S.iren)return '<div class="ov"><form class="dlg" id="irenf" role="dialog" aria-modal="true" aria-label="Renomear"><h3>Renomear recebimento</h3><label>Novo nome<input id="ir-name" required maxlength="80" value="'+esc(S.iren.name)+'"></label>'+(S.iren.rec?'<div class="sub">Repete todo mês: o nome muda em todos os meses.</div>':'')+'<div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
   if(S.ren)return renameFormHTML();
   if(S.invPay)return invoicePayFormHTML();
   if(S.askPass){
@@ -1317,7 +1318,7 @@ function exportXlsx(){
 }
 
 var tt;function toast(m){var t=$("#toast");t.textContent=m;clearTimeout(tt);tt=setTimeout(function(){t.textContent=""},3200);}
-function closeAll(){S.list=null;S.carry=null;S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
+function closeAll(){S.iren=null;S.list=null;S.carry=null;S.ren=null;S.invPay=null;H.form=null;H.pay=null;R.form=false;S.askPass=null;L.form=null;S.pending=null;S.form=false;S.pessoas=false;S.newp=null;S.text=null;}
 
 /* ---------- empréstimos (aba "Emprestimos" da planilha) ---------- */
 /* Uma linha por empréstimo que você pegou:
@@ -1508,7 +1509,7 @@ function incomeHTML(){
   var last12=[];for(var m=i-11;m<=i;m++)last12=last12.concat(incomeFor(m).filter(function(e){return !e.projected}));
   var cats='<section class="card"><div class="ch"><h2>De onde vem o dinheiro</h2><span class="sub">últimos 12 meses até '+mshort(i)+'</span></div>'+hbarsHTML(sumBy(last12,function(e){return e.category}))+'</section>';
   var list='<section class="card"><div class="lh"><h2>Recebimentos de '+mname(i)+'</h2><button class="btn sm" data-act="incform">+ Recebimento</button></div>'+(es.length?es.sort(function(a,b){return b.amount-a.amount}).map(function(e){
-    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><b>'+esc(e.name)+'</b></div><div class="m"><span class="tag">'+esc(e.category)+'</span>'+(e.account?'<span class="tag">'+esc(e.account)+'</span>':'')+'<span class="tag">'+esc(e.person)+'</span>'+(e.date&&!e.projected?'<span class="tag">'+dateBR(e.date)+'</span>':'')+'<button class="tag btnlike'+(e.rec?' on':'')+'" data-act="irec" data-id="'+esc(e.id)+'">'+(e.rec?'Repete todo mês':'Só neste mês')+'</button>'+(e.projected?'<span class="tag">previsto</span>':'')+'</div></div><div class="amt num inc-t">'+BRL.format(e.amount)+'</div><span class="owners"><button class="o" data-act="idel" data-id="'+esc(e.id)+'">'+(e.rec?'excluir (todos os meses)':'excluir')+'</button></span></div></div>';
+    return '<div class="grp"><div class="row"><div class="nm"><div class="t"><b>'+esc(e.name)+'</b></div><div class="m"><span class="tag">'+esc(e.category)+'</span>'+(e.account?'<span class="tag">'+esc(e.account)+'</span>':'')+'<span class="tag">'+esc(e.person)+'</span>'+(e.date&&!e.projected?'<span class="tag">'+dateBR(e.date)+'</span>':'')+'<button class="tag btnlike'+(e.rec?' on':'')+'" data-act="irec" data-id="'+esc(e.id)+'">'+(e.rec?'Repete todo mês':'Só neste mês')+'</button><button class="tag btnlike" data-act="iren" data-id="'+esc(e.id)+'">renomear</button>'+(e.projected?'<span class="tag">previsto</span>':'')+'</div></div><div class="amt num inc-t">'+BRL.format(e.amount)+'</div><span class="owners"><button class="o" data-act="idel" data-id="'+esc(e.id)+'">'+(e.rec?'excluir (todos os meses)':'excluir')+'</button></span></div></div>';
   }).join(""):'<div class="empty">Nenhum recebimento neste mês.</div>')+'</section>';
   return hero+chart+'<div class="grid2">'+cats+'<section class="card"><div class="ch"><h2>Quem recebeu</h2><span class="sub">'+mshort(i)+'</span></div>'+hbarsHTML(byPerson)+'</section></div>'+list;
 }
@@ -1667,7 +1668,7 @@ function houseHTML(){
   }).join("")+'</div><div class="legend">'+houseTemplates().map(function(t){return '<span class="'+houseCls(t.name)+'"><i class="dot"></i>'+esc(t.name)+'</span>'}).join("")+'<span><i class="hatch"></i>Listrado = ainda não pago</span></div></section>';
   var rowHTML=function(h){
     var st=houseStatus(h,i),id=h.tpl?h.tpl.id:h.pays[0].id,open=S.open["H"+id];
-    var meta='<span class="tag">'+esc(h.category)+'</span>'+(h.due?'<span class="tag">vence dia '+h.due+'</span>':'')+'<span class="tag'+(st.c==="late"?' late':'')+(st.c==="ok"?' on':'')+'">'+st.t+'</span>'+(h.paid&&h.tpl&&Math.abs(h.amount-h.expected)>0.009?'<span class="tag">previsto '+BRL.format(h.expected)+'</span>':'');
+    var meta='<span class="tag">'+esc(h.category)+'</span>'+(h.due?'<span class="tag">vence dia '+h.due+'</span>':'')+'<span class="tag'+(st.c==="late"?' late':'')+(st.c==="ok"?' on':'')+'">'+st.t+'</span>'+(h.paid&&h.tpl&&Math.abs(h.amount-h.expected)>0.009?'<span class="tag">previsto '+BRL.format(h.expected)+'</span>':'')+(h.tpl?'<button class="tag btnlike" data-act="hedit" data-id="'+esc(h.tpl.id)+'">renomear / editar</button>':'');
     var btn=h.paid?'<button class="o cinc on" data-act="hunpay" data-id="'+esc(id)+'" title="Desfazer pagamento">Paga ✓</button>':'<button class="o" data-act="hpay" data-id="'+esc(id)+'">Pagar</button>';
     var det=open?'<div class="det">'+h.pays.map(function(p){return '<div><span class="dn">Pago em '+esc(p.date.split("-").reverse().join("/"))+(p.account?' · '+esc(p.account):'')+'</span><span class="da num">'+BRL.format(Math.abs(p.amount))+'</span></div>'}).join("")+(h.tpl?'<div><span class="dn">Valor previsto '+BRL.format(h.expected)+(h.tpl.account?' · paga pela conta '+esc(h.tpl.account):'')+'</span><span class="da"><button data-act="hedit" data-id="'+esc(h.tpl.id)+'">editar conta</button><button data-act="hdel" data-id="'+esc(h.tpl.id)+'">excluir conta</button></span></div>':'')+'</div>':'';
     return '<div class="grp"><div class="row"><div class="nm"><div class="t"><span class="dot '+houseCls(h.name)+'"></span><button data-act="open" data-g="H'+esc(id)+'" aria-expanded="'+!!open+'">'+esc(h.name)+'</button></div><div class="m">'+meta+'</div></div><div class="amt num">'+BRL.format(h.amount)+'</div><span class="owners">'+btn+'</span></div>'+det+'</div>';
@@ -1726,6 +1727,7 @@ document.addEventListener("click",function(ev){
   if(a==="impmove"){var ir=impRows(d.id),to=$("#impc-"+d.id).value;var mv=ir.filter(function(r){return !sameCard(r.card,to)});if(!mv.length){toast("Já está nesse cartão.");return;}moveRowsToCard(mv,to);toast(mv.length+" linha"+(mv.length===1?"":"s")+" movida"+(mv.length===1?"":"s")+" para "+to+".");render();return;}
   if(a==="impundo"){if(el.dataset.sure){var iu=impRows(d.id);if(iu.length&&commit(iu,[]))toast("Importação desfeita.");render();return;}el.dataset.sure="1";el.textContent="confirmar (apaga "+impRows(d.id).length+" linhas)";return;}
   if(a==="carry"){S.carry={card:S.card,month:S.sel};render();var cy=$("#cy-amt");if(cy)cy.focus();return;}
+  if(a==="iren"){var ir0=S.rows.find(function(x){return x.id===d.id});if(!ir0)return;S.iren={id:ir0.id,name:ir0.name,rec:isRec(ir0)};render();var irn=$("#ir-name");if(irn){irn.focus();irn.select();}return;}
   if(a==="ren"){var rg=groupRows(d.g);if(!rg.length)return;S.ren={gid:d.g,name:rg[0].name};render();var rn=$("#rn-name");if(rn){rn.focus();rn.select();}return;}
   if(a==="invpay"){var ti=0;entriesFor(S.sel).forEach(function(e){ti+=e.amount});S.invPay={card:S.card,month:S.sel,total:r2(ti)};render();var ia=$("#iv-amt");if(ia){ia.focus();ia.select();}return;}
   if(a==="invunpay"){if(el.dataset.sure){var ip=S.rows.find(function(x){return x.id===d.id});if(ip&&commit([ip],[]))toast("Pagamento desfeito.");render();return;}el.dataset.sure="1";el.textContent="confirmar";return;}
@@ -1793,6 +1795,7 @@ document.addEventListener("change",function(ev){
 document.addEventListener("submit",function(ev){
   var id=ev.target.id;
   if(id==="carryf"){ev.preventDefault();submitCarry();return;}
+  if(id==="irenf"){ev.preventDefault();var inn2=$("#ir-name").value.replace(/\s+/g," ").trim();if(!inn2){toast("Escreva um nome.");return;}var irr=S.rows.find(function(x){return x.id===S.iren.id});if(irr&&irr.name!==inn2)changeRows([irr],function(r){r.name=inn2;});S.iren=null;toast("Recebimento renomeado.");render();return;}
   if(id==="renf"){ev.preventDefault();var nn=$("#rn-name").value.replace(/\s+/g," ").trim();if(!nn){toast("Escreva um nome.");return;}var rr=groupRows(S.ren.gid);if(rr.length)renameRows(rr,nn,$("#rn-mem").checked);S.ren=null;toast("Compra renomeada.");render();return;}
   if(id==="invf"){ev.preventDefault();submitInvoicePay();return;}
   if(id==="hf"){ev.preventDefault();submitHouse();return;}
@@ -1805,7 +1808,7 @@ document.addEventListener("submit",function(ev){
   else if(id==="newpf"){ev.preventDefault();var n=addPerson($("#np-name").value);if(n&&S.newp){var g=S.newp.g;S.newp=null;var rows=groupRows(g);if(!rows.every(function(r){return r.person===n}))setOwner(g,n);render();}}
   else if(id==="addpf"){ev.preventDefault();var n2=addPerson($("#ap-name").value);if(n2){render();var i2=$("#ap-name");if(i2)i2.focus();}}
 });
-document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.list||S.carry||S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
+document.addEventListener("keydown",function(ev){if(ev.key==="Escape"&&(S.iren||S.list||S.carry||S.ren||S.invPay||H.form||H.pay||R.form||S.askPass||L.form||S.pending||S.form||S.pessoas||S.newp||S.text)){closeAll();render();}});
 var dc=0;
 window.addEventListener("dragenter",function(e){if(e.dataTransfer&&Array.prototype.indexOf.call(e.dataTransfer.types||[],"Files")>-1){dc++;$("#drop").hidden=false;}});
 window.addEventListener("dragleave",function(){dc=Math.max(0,dc-1);if(!dc)$("#drop").hidden=true;});
