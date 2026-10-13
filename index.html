@@ -612,6 +612,7 @@ function firstMonth(r){
   var i=idx(+d[1],+d[2]);return r.parcelas>1?i+1:i;
 }
 function instValue(r){var v=Math.abs(r.amount);return /\[valor-total\]/.test(r.notes)&&r.parcelas>1?r2(v/r.parcelas):v;}
+function isFixed(r){return r.notes.indexOf("[fixo-mensal]")>-1;}
 function isRec(r){return /\[recorrente\]/.test(r.notes);}
 function setMarker(notes,marker,on){notes=notes.split(marker).join("").replace(/\s+/g," ").trim();return on?(notes+" "+marker).trim():notes;}
 var GABI="Cartão Gabi";
@@ -626,11 +627,12 @@ function realMonths(){var s={};expenses().forEach(function(r){if(r.parcelas<=1)s
 function gidOf(e){return e.key+"|"+(e.total||1)+"|"+(e.total?e.F:"")+"|"+e.kind;}
 function entriesFor(i,real){
   if(!real)real=realMonths();
-  var isReal=!!real[i],out=[],latestRec={};
+  var isReal=!!real[i],out=[],latestRec={},fixed=[];
   var push=function(r,F,o){out.push({id:r.id,row:r,F:F,name:r.name,key:normKey(r.name),amount:instValue(r),cur:o.cur||null,total:o.total||null,kind:o.kind,owner:r.person,date:r.date,projected:!isReal||!!o.proj});};
   expenses().forEach(function(r){
     var F=firstMonth(r);
     if(r.parcelas>1){var k=i-F+1;if(k>=1&&k<=r.parcelas)push(r,F,{cur:k,total:r.parcelas,kind:"parcelado"});return;}
+    if(isFixed(r)){if(i>=F)fixed.push({r:r,F:F});return;}
     if(isRec(r)){
       if(i===F)push(r,F,{kind:"recorrente"});
       else if(i>F&&!isReal){var k2=normKey(r.name);if(!latestRec[k2]||latestRec[k2].F<F)latestRec[k2]={r:r,F:F};}
@@ -639,6 +641,8 @@ function entriesFor(i,real){
     if(i===F)push(r,F,{kind:"avulso"});
   });
   Object.keys(latestRec).forEach(function(k){push(latestRec[k].r,latestRec[k].F,{kind:"recorrente",proj:true})});
+  /* Fixo mensal (ex.: Claro, YouTube): entra em todo mês desde o início, a não ser que a fatura do banco já traga a mesma cobrança. */
+  fixed.forEach(function(f){var k=normKey(f.r.name);if(!out.some(function(e){return e.key===k&&sameCard(e.row.card,f.r.card)}))push(f.r,f.F,{kind:"fixo",proj:false});});
   /* Cartão Gabi: sem fatura importada no mês, entra a média mensal como estimativa. */
   if(S.gabiAvg>0&&i>=nowIdx()&&(S.card==="all"||sameCard(S.card,GABI))&&!out.some(function(e){return sameCard(e.row.card,GABI)}))
     out.push({id:"gabi-"+i,row:null,virtual:true,F:i,name:"Cartão Gabi (média)",key:"cartao gabi (media)",amount:S.gabiAvg,cur:null,total:null,kind:"estimativa",owner:BASE[0],date:"",projected:true});
@@ -1021,6 +1025,7 @@ function listHTML(rm){
       return '<div class="grp"><div class="row"><div class="nm"><div class="t"><b>'+esc(G.name)+'</b></div><div class="m"><span class="tag">média estimada</span>'+(S.card==="all"?'<span class="tag">'+esc(GABI)+'</span>':'')+'<span class="tag">sem fatura importada neste mês</span></div></div><div class="amt num">'+BRL.format(G.sum)+'</div><span class="owners"><button class="o" data-act="card" data-c="'+esc(GABI)+'">alterar média</button></span></div></div>';
     }
     if(G.total)meta+='<span class="tag">parcela '+G.cur+'/'+G.total+(G.total>G.cur?' · faltam '+(G.total-G.cur):' · última')+'</span>';
+    else if(G.kind==="fixo")meta+='<span class="tag on">fixo todo mês</span>';
     else meta+='<button class="tag btnlike'+(G.kind==="recorrente"?' on':'')+'" data-act="kind" data-g="'+esc(G.id)+'" title="Marque se repete todo mês">'+(G.kind==="recorrente"?'Repete todo mês':'Só neste mês')+'</button>';
     if(G.items.length>1)meta+='<span class="tag">×'+G.items.length+'</span>';
     meta+='<button class="tag btnlike" data-act="ren" data-g="'+esc(G.id)+'" title="Renomear esta compra">renomear</button>';
@@ -1121,7 +1126,7 @@ function modalHTML(){
   }
   if(S.form){
     var defCard=S.card==="all"?"Nubank":S.card;
-    return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="recorrente">Repete todo mês</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
+    return '<div class="ov"><form class="dlg" id="addf" role="dialog" aria-modal="true" aria-label="Novo lançamento"><h3>Novo lançamento em '+mname(S.sel)+'</h3><label>Descrição<input id="m-name" required placeholder="Ex.: Mercado, mensalidade, empréstimo"></label><div class="two"><label>Valor (R$)<input id="m-amt" required inputmode="decimal" placeholder="0,00"></label><label>De quem é<select id="m-own">'+S.people.map(function(p){return '<option>'+esc(p)+'</option>'}).join("")+'</select></label></div><div class="two"><label>Cartão<input id="m-card" list="cardlist" value="'+esc(defCard)+'">'+cardOptions()+'</label><label>Categoria<input id="m-cat" placeholder="Ex.: Alimentacao"></label></div><label>Tipo<select id="m-kind"><option value="avulso">Só neste mês</option><option value="fixo">Fixo todo mês (ex.: internet, assinatura)</option><option value="recorrente">Repete todo mês (até vir na fatura)</option><option value="parcelado">Parcelado</option></select></label><div class="two" id="m-par" hidden><label>Parcela deste mês<input id="m-cur" inputmode="numeric" placeholder="1"></label><label>Total de parcelas<input id="m-tot" inputmode="numeric" placeholder="10"></label></div><div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Gravar</button></div></form></div>';
   }
   if(S.carry)return carryFormHTML();
   if(S.iren)return '<div class="ov"><form class="dlg" id="irenf" role="dialog" aria-modal="true" aria-label="Renomear"><h3>Renomear recebimento</h3><label>Novo nome<input id="ir-name" required maxlength="80" value="'+esc(S.iren.name)+'"></label>'+(S.iren.rec?'<div class="sub">Repete todo mês: o nome muda em todos os meses.</div>':'')+'<div class="foot"><button type="button" class="btn" data-act="cancel">Cancelar</button><button class="btn primary" type="submit">Salvar</button></div></form></div>';
@@ -1194,7 +1199,7 @@ function addManual(){
   if(kind==="parcelado"&&(!(cur>=1)||!(tot>=2)||cur>tot)){toast("Informe a parcela deste mês e o total de parcelas.");return;}
   var F=kind==="parcelado"?S.sel-(cur-1):S.sel;
   var date=S.sel===nowIdx()?todayISO():mid(F)+"-01";
-  var row={date:date,name:name,category:cat,account:card,amount:-r2(amt),person:own,card:card,status:"Credito",parcelas:kind==="parcelado"?tot:1,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(kind==="recorrente"?" [recorrente]":"")};
+  var row={date:date,name:name,category:cat,account:card,amount:-r2(amt),person:own,card:card,status:"Credito",parcelas:kind==="parcelado"?tot:1,notes:"[valor-parcela] [primeira-parcela="+mid(F)+"]"+(kind==="recorrente"?" [recorrente]":"")+(kind==="fixo"?" [recorrente] [fixo-mensal]":"")};
   if(commit([],[row])){S.form=false;toast("Lançamento gravado.");}
   render();
 }
