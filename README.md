@@ -55,6 +55,13 @@ A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como lin
 
 Resumo do mês: recebido, já pago (faturas pelos pagamentos registrados, contas da casa pagas e parcelas de empréstimo pagas), falta pagar, saldo hoje (recebido − já pago) e saldo depois de pagar tudo; e e gráficos: recebido x gasto mês a mês, saldo acumulado, onde mais gastamos (categorias), gastos por cartão, por pessoa, maiores gastos e as 5 maiores categorias mês a mês. Os gastos somam todos os cartões, as contas da casa, a média do Cartão Gabi e as parcelas dos empréstimos.
 
+## Guia do mês
+
+- **Para onde vai o dinheiro**: gráfico de fluxo (o "rio") do que entrou para cada área de gasto e o que sobrou (ou faltou).
+- **Áreas e limites**: limite mensal por área (salvo no navegador), com aviso quando passa.
+- **Sugestões**: alerta quando o gasto passa do recebido, juros/multas/IOF do mês, maior área controlável, parcelas já comprometidas e lista de assinaturas com dica de economia para cada uma.
+- **Áreas das compras**: compras sem categoria recebem uma área sugerida pelo nome (iFood → Comida fora, Petlove → Pets…). Na aba Fatura, a etiqueta da área em cada compra abre a escolha; a área é gravada na coluna Categoria e pode valer para todas as compras com o mesmo nome.
+
 ## Cartão Gabi
 
 A partir do mês atual, nos meses sem fatura importada do `Cartão Gabi`, o app usa uma média mensal (R$ 1.000 por padrão, editável na aba do cartão). A média fica salva no navegador.
