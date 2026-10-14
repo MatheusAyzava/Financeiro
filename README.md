@@ -35,6 +35,7 @@ Sem `VITE_GOOGLE_SCRIPT_URL`, os dados ficam só no navegador.
 - **Últimas importações**: cada importação fica marcada (`[imp=...]`); na aba Fatura dá para mudar o cartão de tudo que veio daquele arquivo ou desfazer a importação.
 - **Renomear**: o botão "renomear" em cada compra muda o nome na planilha e guarda o nome da fatura em `[nome-original=...]`, para reimportar sem duplicar. Com "Usar esse nome nas próximas faturas", as compras com o mesmo nome original já entram renomeadas.
 - **Valor pendente do mês anterior (rotativo)**: entra na fatura com categoria "Rotativo" e `[pendente-anterior]`, soma no total e no que falta pagar, mas não entra em Gastos x Recebidos (já foi gasto no mês anterior). Se o arquivo do banco não trouxer essa linha, use "+ Saldo da fatura anterior" com o cartão selecionado. Cobranças como "IOF Rotativo" continuam contando como gasto.
+- **Acertar com o banco**: com um cartão selecionado, "acertar com o banco" recebe o valor que o banco mostra para pagar e lança a diferença como "Ajuste com o banco" (`[ajuste]`), para a fatura bater com o banco.
 - **Fixo todo mês**: em "+ Lançamento", o tipo "Fixo todo mês" (`[fixo-mensal]`) entra em todo mês desde o início (ex.: internet, assinaturas), mesmo nos meses com fatura importada; se a fatura do banco trouxer a mesma cobrança, vale a do banco.
 - **Relatório / lista**: monta o texto para enviar. Para uma pessoa: todos os cartões do mês (item, valor, parcela), total por cartão e total geral. "Relatório completo do mês": cartões (total, pago/falta e parte de cada pessoa), casa, empréstimos, recebidos e resumo. O texto é editável antes de enviar; dá para copiar, abrir no WhatsApp ou imprimir/salvar em PDF. Também há o atalho "Relatório do mês" em Gastos x Recebidos.
 - **Baixar tudo / Baixar lista / Copiar**: gera planilha Excel ou texto para mandar para cada pessoa.
@@ -50,6 +51,8 @@ Na aba `Lancamentos`, sem cartão: a conta fixa é uma linha com `[conta-casa] [
 A aba **Recebidos** lança o que entra (salário, freela, reembolso…) como linha com valor positivo na aba `Lancamentos`. "Repete todo mês" projeta o recebimento nos meses seguintes até haver um lançamento com o mesmo nome.
 
 ## Gastos x Recebidos
+
+Por padrão a aba mostra só o Matheus: na fatura entra só a parte dele de cada cartão (compras sem dono contam como dele) e o que é de outras pessoas aparece à parte, como "de outras pessoas", sem somar. Os botões de pessoa trocam a visão; "Todos juntos" soma tudo.
 
 **Conta do mês**: tabela com cada cartão, conta da casa e parcela de empréstimo (Total | Já pago | Falta) e a conta: Recebido − Já pago = Saldo hoje; Saldo hoje − Falta pagar = Sobra no fim do mês. No gráfico Recebido x Gasto, a parte cheia do gasto é o que já foi pago e a listrada é o que falta.
 
