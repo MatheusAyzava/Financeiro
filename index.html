@@ -624,7 +624,8 @@ function expenses(card){card=card||S.card;return S.rows.filter(function(r){retur
 
 /* ---------- modelo ---------- */
 function realMonths(){var s={};expenses().forEach(function(r){if(r.parcelas<=1)s[firstMonth(r)]=1});return s;}
-function gidOf(e){return e.key+"|"+(e.total||1)+"|"+(e.total?e.F:"")+"|"+e.kind;}
+/* Cada compra é uma linha própria na lista (sem juntar compras com o mesmo nome em "×2"). */
+function gidOf(e){return String(e.id);}
 function entriesFor(i,real){
   if(!real)real=realMonths();
   var isReal=!!real[i],out=[],latestRec={},fixed=[];
